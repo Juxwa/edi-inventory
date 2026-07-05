@@ -1,0 +1,33 @@
+{
+  "name": "app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "db:push": "supabase db push -p \"$SUPABASE_DB_PASSWORD\"",
+    "import": "tsx --env-file=.env.local scripts/import/run.ts"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "@supabase/supabase-js": "^2",
+    "csv-parse": "^5"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "typescript": "^5",
+    "vitest": "^3",
+    "supabase": "^2",
+    "tsx": "^4",
+    "dotenv": "^16"
+  }
+}
