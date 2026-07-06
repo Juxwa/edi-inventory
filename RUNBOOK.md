@@ -147,3 +147,51 @@ npm run dev
 
 - Task 4's file list specifies `src/app/(app)/layout.tsx` — that exists as planned and will wrap Tasks 5-8 pages (`products`, `suppliers`, `inventory`). The dashboard route (`/`) itself is **not** under `(app)/page.tsx` — see step 0a above for why — it's at root `src/app/page.tsx` and calls the same shared `AppShell` component (`src/components/app-shell.tsx`) that `(app)/layout.tsx` uses, so behavior and visuals are identical either way.
 - `sonner`'s Toaster is pinned to `theme="light"` (no `next-themes` dependency added) since Phase 2 has no dark-mode toggle.
+
+---
+
+# Phase 2 Runbook — Admin UI (Tasks 5-6: Products, Suppliers)
+
+Built entirely with Read/Write/Edit tools this session — the sandbox's bash tool was unusable (host disk full), so **none of this has been compiled or run**. Treat the first `npm run build` as the real first build and expect to fix at least minor TypeScript issues.
+
+## 1. Build and fix loop
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- Radix `Select` `name`/`defaultValue` prop typing (used in `product-dialog.tsx`, `product/page.tsx` category filter).
+- The Supabase client here has no generated `Database` type (no `database.types.ts` in the repo), so `.from(...).select(...)/.insert(...)/.update(...)` calls are loosely typed — this was relied on to avoid hand-typing every table shape, but it also means Postgrest will silently accept bad column names until runtime. If you later generate types (`npx supabase gen types typescript`), re-check `products/actions.ts` and `suppliers/actions.ts` insert/update payloads compile cleanly against the stricter types.
+- `product_categories(name)` / `suppliers(name)` embedded-resource selects in `products/page.tsx` — Supabase returns these as an object for a to-one relation, but the JS client's inferred type without a `Database` generic can be an array; the code defensively handles both shapes via a `firstOrNull` helper. If the build or runtime shows category/supplier name always blank, check the actual embed shape returned and adjust `firstOrNull` usage.
+
+## 2. Local checklist — Products (`/products`)
+
+```powershell
+npm run dev
+```
+
+- Visit `/products` as the seeded admin. Table loads (or empty state "No products match your search." if the catalog is empty/filtered).
+- Click **New product** → dialog opens. Leave name blank, submit → inline "Name is required" error, dialog stays open.
+- Fill name only, submit → row appears, dialog closes, toast/redirect not required (revalidatePath refreshes the list).
+- Create a second product with the same name → expect **"Product name already exists."** form error (tests the Postgres 23505 mapping).
+- Edit a product via the row's `…` menu → change SRP, category, supplier, save → row updates, SRP shows with ₱ and thousands separators (e.g. `₱12,500.00`).
+- Toggle **Has serial numbers** and save → "Serialized" badge appears in the Serial column.
+- Archive a product from the `…` menu → row disappears from the default (non-archived) view; check **Show archived** and re-apply → row reappears with an "Archived" badge; unarchive from the same menu, confirm it returns to the default view.
+- Search box: type part of a product name or code, Apply → list filters. Category select: pick a category, Apply → list filters. Clear link resets all filters.
+- Confirm pagination controls appear once there are more than 50 products, and Previous/Next move pages correctly (URL `?page=`).
+
+## 3. Local checklist — Suppliers (`/suppliers`)
+
+- Visit `/suppliers`. Any Phase 1 imported suppliers that were auto-created as stubs (from product supplier names with no other detail) should show an amber **"Needs details"** badge next to the name.
+- Click **New supplier** → create with just a name → appears in list, not marked "Needs details" (new suppliers are never stubs).
+- Edit a stub supplier, fill in contact info, save → confirm the **"Needs details"** badge disappears (this is the `is_stub = false` write on every update — check it happened even if you didn't touch every field).
+- Create a second supplier with a duplicate name → expect **"Supplier name already exists."** error.
+- Use the `…` menu to mark a supplier inactive → badge changes to "Inactive"; mark active again → back to "Active".
+- Search by name and by contact person substring, confirm both match.
+
+## 4. Known gaps / things to double check locally
+
+- No hard delete anywhere by design (products archive, suppliers go inactive) — confirm this matches expectations before go-live.
+- The archive/status toggle and the edit dialog are independent client components reading server-fetched data; after an archive/unarchive or status toggle, the list re-renders via `revalidatePath` but the currently-open row's local `useState` (edit dialog open flag) is unaffected — this is expected, just note it if a stale row briefly shows during rapid clicking.
+- Zod schemas (`src/lib/validators/product.ts`, `src/lib/validators/supplier.ts`) use `z.preprocess` instead of `.pipe()` to keep type inference simple under strict mode — no unit tests were written for them this session (plan called for vitest coverage; not done due to the sandbox outage). Recommend adding `tests/validators-product.test.ts` / `tests/validators-supplier.test.ts` covering: empty name rejected, blank optional fields become `null`, valid SRP/category/email accepted, invalid email rejected.
