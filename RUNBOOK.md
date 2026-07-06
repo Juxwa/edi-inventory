@@ -195,3 +195,63 @@ npm run dev
 - No hard delete anywhere by design (products archive, suppliers go inactive) — confirm this matches expectations before go-live.
 - The archive/status toggle and the edit dialog are independent client components reading server-fetched data; after an archive/unarchive or status toggle, the list re-renders via `revalidatePath` but the currently-open row's local `useState` (edit dialog open flag) is unaffected — this is expected, just note it if a stale row briefly shows during rapid clicking.
 - Zod schemas (`src/lib/validators/product.ts`, `src/lib/validators/supplier.ts`) use `z.preprocess` instead of `.pipe()` to keep type inference simple under strict mode — no unit tests were written for them this session (plan called for vitest coverage; not done due to the sandbox outage). Recommend adding `tests/validators-product.test.ts` / `tests/validators-supplier.test.ts` covering: empty name rejected, blank optional fields become `null`, valid SRP/category/email accepted, invalid email rejected.
+
+---
+
+# Phase 2 Runbook — Admin UI (Tasks 7-8: Stock intake, Inventory views)
+
+Built entirely with Read/Write/Edit tools this session — the sandbox's bash tool was unusable again (broken, per environment constraint). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build.
+
+## 1. Push the new migration
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: `0007_intake_rpc.sql` applies cleanly, adding the `stock_intake(...)` function. Verify in the Supabase dashboard → Database → Functions: `stock_intake` exists, language `plpgsql`, returns `setof uuid`. It relies on RLS being enforced as the calling user (no `security definer`), and the Phase 1 `movements_insert` / `stock_write` policies (in `0006_rls.sql`) already permit admin writes — no policy changes needed for this task.
+
+## 2. Build and fix loop
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- `src/lib/validators/intake.ts` uses a `.transform()` with `ctx.addIssue` + `return z.NEVER` to enforce the serialized-XOR-quantity branch — this is a zod v3 pattern; if the installed zod resolves to a version with different transform/refinement typing, this file is the first place to check.
+- `src/app/(app)/inventory/intake/actions.ts` calls `supabase.rpc('stock_intake', { p_product_id, p_branch_id, p_supplier_id, p_serials, p_quantity, p_cost_per_unit, p_invoice_no, p_invoice_date, p_expiry_date, p_repair_pool, p_office_asset })` — param names must match the SQL function signature exactly (they do, verified against the migration). No generated `Database` type exists in this repo, so this call is loosely typed and Postgrest will accept it at compile time even if a name is wrong — a typo here would only surface at runtime as a Postgres "function not found" error.
+- `src/components/inventory/intake-form.tsx` mixes an uncontrolled Radix `Select` (branch) with a controlled one (supplier, so picking a serialized/non-serialized product can preselect its supplier) — both rely on Radix's hidden-input `name` bubbling to reach `FormData`. If the branch or supplier value isn't reaching the server action, check this first.
+- `src/app/(app)/inventory/page.tsx` resolves product-name search and category filters as two independent product-id lookups against `products`, then applies them as separate `.or()` / `.in()` clauses on `stock` — this avoids an earlier draft bug where combining both filters into one query made "search by name" secretly also require the category match. If filtering behaves oddly with both a search term and a category selected at once, this is the code path to recheck.
+- `src/app/(app)/inventory/aging/page.tsx` fetches the entire `stock_aging` view unpaginated (needed to compute branch × bucket summary counts), then paginates the detail table in memory. Fine at Phase 1's data volume (~20K stock rows, a fraction "available") — if this ever becomes slow, move the summary aggregation into a SQL view/RPC instead of doing it in Next.js.
+
+## 3. Local checklist — Stock intake (`/inventory/intake`)
+
+```powershell
+npm run dev
+```
+
+- Visit `/inventory/intake` as the seeded admin (nav item "Stock intake" only shows for `admin`).
+- Type in the product search box → list filters by name/code as you type. Click a non-serialized product → a Quantity field appears; click a serialized product → a "one serial per line" textarea appears instead, and picking a product with a supplier preselects that supplier in the Supplier select.
+- **Serialized intake:** pick a serialized product, paste 3 serial numbers (one per line, include a blank line and one duplicate to test cleanup), pick a branch, leave supplier as preselected, enter a cost per unit, invoice no, invoice date. Confirm the live count below the textarea shows the deduped count and a "Duplicate lines were removed" note appears. Submit → toast "N units received" (N = 3, not 4), form resets.
+- **Non-serialized intake:** pick a non-serialized product, enter Quantity = 5, fill branch/supplier/cost/invoice date, submit → toast "5 units received".
+- Submit with no product selected → button stays disabled (can't submit). Submit with a product but no branch/supplier/invoice date → inline error message from the zod schema (e.g. "Required").
+
+## 4. Local checklist — Stock list (`/inventory`) and aging (`/inventory/aging`)
+
+- Visit `/inventory`. Confirm the 3 serialized + 1 non-serialized (qty 5) rows from step 3 appear, each with an "Available" (green) status badge, correct branch, cost, and today's date as "Received".
+- Search box: type part of the serial number or product name, Apply → list filters to matching rows only.
+- Category filter: pick the category of the product you just received, Apply → same rows still show; pick an unrelated category → rows disappear. Confirm search + category together narrow correctly (not overly broad or overly narrow — see build note above).
+- Status filter: select "Available" → rows show; select any other status → rows disappear (nothing else has been through a status transition yet).
+- Branch filter: only visible for `admin`/`top_mgmt` roles — confirm a `branch_rep` test user does not see the Branch dropdown and their list is already scoped to their own branch (RLS, not UI filtering).
+- Click "View aging report" → navigates to `/inventory/aging`. Confirm a link/button "Back to stock" returns to `/inventory`.
+- On `/inventory/aging`: summary table shows one row per branch with counts in the 0-90 / 91-180 / 181-365 / 365+ columns — the stock you just received should show up under "0-90" for its branch. Detail table below lists the same rows sorted by days-on-hand descending, each with a bucket badge (green/neutral/amber/red).
+
+## 5. Verify movements in the Supabase dashboard
+
+- Table Editor → `stock_movements`. Confirm 4 new rows exist (3 for the serialized intake, 1 for the non-serialized), each `movement_type = 'intake'`, `to_branch_id` matching the branch picked, `quantity` = 1 for each serialized row and 5 for the non-serialized row, `actor_id` = your admin user's id.
+- Table Editor → `stock`. Confirm 4 new rows: 3 with distinct `serial_number` values and `quantity = 1`, one with `serial_number` null and `quantity = 5`; all `status = 'available'`, `total_cost` = `cost_per_unit` for the serialized rows and `cost_per_unit * 5` for the quantity row.
+
+## 6. Known gaps / things to double check locally
+
+- No client-side or server-side check that a submitted serial number doesn't already exist elsewhere in `stock` — duplicate real-world serials across intakes are not rejected by the RPC or the form. If that's a requirement, it needs a uniqueness constraint or a pre-check query added later.
+- The product picker in the intake form loads the full active product list client-side (no server-side search) — fine at ~555 products (Phase 1 import size), would need a real search endpoint if the catalog grows much larger.
+- `/inventory/aging`'s in-memory pagination re-fetches and re-buckets the full aging view on every page click (no caching) — acceptable for now, flagged above as a spot to revisit if it's slow in practice.

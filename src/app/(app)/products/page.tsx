@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PlusIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/supabase/profile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -50,9 +52,14 @@ function firstOrNull<T>(value: T | T[] | null): T | null {
 export default async function ProductsPage({
   searchParams,
 }: ProductsPageProps) {
+  const profile = await getProfile();
+  if (!profile || !["admin", "top_mgmt"].includes(profile.role)) {
+    redirect("/");
+  }
   const params = await searchParams;
   const q = params.q?.trim() ?? "";
   const categoryParam = params.category?.trim() ?? "";
+  const categoryId = Number.parseInt(categoryParam, 10) || null;
   const showArchived = params.archived === "true";
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
@@ -86,8 +93,8 @@ export default async function ProductsPage({
   if (q) {
     query = query.or(`name.ilike.%${q}%,code.ilike.%${q}%`);
   }
-  if (categoryParam) {
-    query = query.eq("category_id", categoryParam);
+  if (categoryId !== null) {
+    query = query.eq("category_id", categoryId);
   }
 
   const { data, count } = await query;

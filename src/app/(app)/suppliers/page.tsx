@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { PlusIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/supabase/profile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,6 +25,10 @@ type SuppliersPageProps = {
 export default async function SuppliersPage({
   searchParams,
 }: SuppliersPageProps) {
+  const profile = await getProfile();
+  if (!profile || !["admin", "top_mgmt"].includes(profile.role)) {
+    redirect("/");
+  }
   const params = await searchParams;
   const q = params.q?.trim() ?? "";
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
