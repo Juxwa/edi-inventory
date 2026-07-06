@@ -23,11 +23,14 @@ export function mapStock(
   const status = STATUS_MAP[clean(row['Status']) ?? ''];
   if (!status) return { exception:
     { row: n, reason: `unknown status: ${row['Status']}`, data: JSON.stringify(row) } };
+  const qty = toNum(row['Quantity']) ?? 0;
+  if (qty < 0) return { exception:
+    { row: n, reason: `negative quantity: ${qty}`, data: JSON.stringify(row) } };
   return { record: {
     legacy_id: clean(row['unique id']),
     product_id, branch_id,
     supplier_id: suppliers.get(clean(row['Supplier']) ?? '') ?? null,
-    quantity: toNum(row['Quantity']) ?? 0,
+    quantity: qty,
     original_quantity: toNum(row['Original Quantity']),
     serial_number: clean(row['Serial Number']),
     status,
