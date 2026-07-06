@@ -41,10 +41,20 @@ export async function importProducts(file: string) {
   const categories = new Map((await fetchAll(client, 'product_categories', 'id,name')).map(r => [r.name, r.id]));
   const suppliers = new Map((await fetchAll(client, 'suppliers', 'id,name')).map(r => [r.name, r.id]));
 
-  const records: object[] = []; const exceptions: Exception[] = [];
+  const records: { name: string }[] = []; const exceptions: Exception[] = [];
+  const seenNames = new Set<string>();
   rows.forEach((row, i) => {
     const r = mapProduct(row, i + 2, categories, suppliers);
-    'record' in r ? records.push(r.record) : exceptions.push(r.exception);
+    if ('exception' in r) { exceptions.push(r.exception); return; }
+    const rec = r.record as { name: string };
+    if (seenNames.has(rec.name)) {
+      exceptions.push({ row: i + 2,
+        reason: `duplicate product name (first occurrence kept): ${rec.name}`,
+        data: JSON.stringify(row) });
+      return;
+    }
+    seenNames.add(rec.name);
+    records.push(rec);
   });
   await batchUpsert(client, 'products', records);
   writeExceptions('products', exceptions);
