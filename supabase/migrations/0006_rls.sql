@@ -61,7 +61,8 @@ create policy movements_read on stock_movements for select to authenticated
   using (auth_role() in ('admin','top_mgmt')
          or from_branch_id = auth_branch() or to_branch_id = auth_branch());
 create policy movements_insert on stock_movements for insert to authenticated
-  with check (true);
+  with check (auth_role() in ('admin','top_mgmt')
+              or from_branch_id = auth_branch() or to_branch_id = auth_branch());
 
 create policy customers_read on customers for select to authenticated
   using (auth_role() in ('admin','top_mgmt') or branch_created_id = auth_branch());
@@ -73,7 +74,9 @@ create policy visits_all on visits for all to authenticated
   using (auth_role() in ('admin','top_mgmt')
          or exists (select 1 from customers c where c.id = customer_id
                     and c.branch_created_id = auth_branch()))
-  with check (true);
+  with check (auth_role() in ('admin','top_mgmt')
+         or exists (select 1 from customers c where c.id = customer_id
+                    and c.branch_created_id = auth_branch()));
 
 create policy sales_read on sales for select to authenticated
   using (auth_role() in ('admin','top_mgmt') or branch_id = auth_branch());
@@ -83,7 +86,8 @@ create policy sales_write on sales for all to authenticated
 create policy sli_all on sale_line_items for all to authenticated
   using (exists (select 1 from sales s where s.id = sale_id
          and (auth_role() in ('admin','top_mgmt') or s.branch_id = auth_branch())))
-  with check (true);
+  with check (exists (select 1 from sales s where s.id = sale_id
+         and (auth_role() = 'admin' or s.branch_id = auth_branch())));
 
 create policy req_all on inventory_requests for all to authenticated
   using (auth_role() in ('admin','top_mgmt') or requesting_branch_id = auth_branch())
@@ -91,7 +95,8 @@ create policy req_all on inventory_requests for all to authenticated
 create policy rli_all on request_line_items for all to authenticated
   using (exists (select 1 from inventory_requests r where r.id = request_id
          and (auth_role() in ('admin','top_mgmt') or r.requesting_branch_id = auth_branch())))
-  with check (true);
+  with check (exists (select 1 from inventory_requests r where r.id = request_id
+         and (auth_role() = 'admin' or r.requesting_branch_id = auth_branch())));
 
 create policy transfers_all on transfers for all to authenticated
   using (auth_role() in ('admin','top_mgmt')
@@ -101,7 +106,8 @@ create policy tli_all on transfer_line_items for all to authenticated
   using (exists (select 1 from transfers t where t.id = transfer_id
          and (auth_role() in ('admin','top_mgmt')
               or t.from_branch_id = auth_branch() or t.to_branch_id = auth_branch())))
-  with check (true);
+  with check (exists (select 1 from transfers t where t.id = transfer_id
+         and (auth_role() = 'admin' or t.from_branch_id = auth_branch())));
 
 -- Repairs: technical role sees all repairs; branch users own branch
 create policy repairs_all on repair_requests for all to authenticated
@@ -113,7 +119,9 @@ create policy rse_all on repair_status_events for all to authenticated
   using (exists (select 1 from repair_requests r where r.id = repair_id
          and (auth_role() in ('admin','top_mgmt','technical')
               or r.requesting_branch_id = auth_branch())))
-  with check (true);
+  with check (exists (select 1 from repair_requests r where r.id = repair_id
+         and (auth_role() in ('admin','technical')
+              or r.requesting_branch_id = auth_branch())));
 create policy earmold_all on earmold_requests for all to authenticated
   using (auth_role() in ('admin','top_mgmt','technical')
          or requesting_branch_id = auth_branch())

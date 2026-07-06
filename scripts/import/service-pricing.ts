@@ -1,5 +1,5 @@
 import { readCsv, clean, toNum, writeExceptions,
-         serviceClient, batchUpsert, Exception } from './lib';
+         serviceClient, batchUpsert, fetchAll, Exception } from './lib';
 
 type Row = Record<string, string>;
 
@@ -27,10 +27,8 @@ export async function importServicePricing(file: string) {
   await batchUpsert(client, 'services',
     serviceNames.map(name => ({ name, is_stub: true })), 'name');
 
-  const { data: brs } = await client.from('branches').select('id,name');
-  const { data: svs } = await client.from('services').select('id,name');
-  const branches = new Map(brs!.map(b => [b.name, b.id]));
-  const services = new Map(svs!.map(s => [s.name, s.id]));
+  const branches = new Map((await fetchAll(client, 'branches', 'id,name')).map(r => [r.name, r.id]));
+  const services = new Map((await fetchAll(client, 'services', 'id,name')).map(r => [r.name, r.id]));
 
   const records: object[] = []; const exceptions: Exception[] = [];
   rows.forEach((row, i) => {

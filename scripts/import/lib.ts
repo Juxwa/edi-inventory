@@ -48,6 +48,19 @@ export function serviceClient() {
     { auth: { persistSession: false } });
 }
 
+export async function fetchAll(
+  client: ReturnType<typeof serviceClient>, table: string, columns: string,
+): Promise<Record<string, any>[]> {
+  const out: Record<string, any>[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await client.from(table).select(columns).range(from, from + 999);
+    if (error) throw new Error(`${table} fetch: ${error.message}`);
+    out.push(...data!);
+    if (data!.length < 1000) break;
+  }
+  return out;
+}
+
 export async function batchUpsert(
   client: ReturnType<typeof serviceClient>,
   table: string, rows: object[], onConflict = 'legacy_id',

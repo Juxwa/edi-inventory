@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { readdirSync } from 'node:fs';
 import { importBranches } from './branches';
 import { importProducts } from './products';
 import { importServicePricing } from './service-pricing';
@@ -8,8 +9,7 @@ import { serviceClient } from './lib';
 
 const dir = 'data/exports';
 const file = (prefix: string) => {
-  const fs = require('node:fs');
-  const match = fs.readdirSync(dir).find((f: string) => f.startsWith(prefix));
+  const match = readdirSync(dir).find((f: string) => f.startsWith(prefix));
   if (!match) throw new Error(`no export file starting with ${prefix}`);
   return `${dir}/${match}`;
 };

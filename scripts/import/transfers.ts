@@ -1,5 +1,5 @@
 import { readCsv, clean, parseBubbleDate, writeExceptions,
-         serviceClient, batchUpsert, Exception } from './lib';
+         serviceClient, batchUpsert, fetchAll, Exception } from './lib';
 
 type Row = Record<string, string>;
 
@@ -32,8 +32,7 @@ export function mapTransfer(
 export async function importTransfers(file: string) {
   const client = serviceClient();
   const rows = readCsv(file);
-  const { data: brs } = await client.from('branches').select('id,name');
-  const branches = new Map(brs!.map(b => [b.name, b.id]));
+  const branches = new Map((await fetchAll(client, 'branches', 'id,name')).map(r => [r.name, r.id]));
   const records: object[] = []; const exceptions: Exception[] = [];
   rows.forEach((row, i) => {
     const r = mapTransfer(row, i + 2, branches);

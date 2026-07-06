@@ -1,5 +1,5 @@
 import { readCsv, clean, toBool, toNum, parseBubbleDate, writeExceptions,
-         serviceClient, batchUpsert, Exception } from './lib';
+         serviceClient, batchUpsert, fetchAll, Exception } from './lib';
 
 type Row = Record<string, string>;
 
@@ -46,12 +46,9 @@ export function mapStock(
 export async function importStock(file: string) {
   const client = serviceClient();
   const rows = readCsv(file);
-  const { data: prods } = await client.from('products').select('id,name');
-  const { data: brs } = await client.from('branches').select('id,name');
-  const { data: sups } = await client.from('suppliers').select('id,name');
-  const products = new Map(prods!.map(p => [p.name, p.id]));
-  const branches = new Map(brs!.map(b => [b.name, b.id]));
-  const suppliers = new Map(sups!.map(s => [s.name, s.id]));
+  const products = new Map((await fetchAll(client, 'products', 'id,name')).map(r => [r.name, r.id]));
+  const branches = new Map((await fetchAll(client, 'branches', 'id,name')).map(r => [r.name, r.id]));
+  const suppliers = new Map((await fetchAll(client, 'suppliers', 'id,name')).map(r => [r.name, r.id]));
 
   const records: object[] = []; const exceptions: Exception[] = [];
   rows.forEach((row, i) => {
