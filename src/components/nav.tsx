@@ -43,6 +43,21 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    section: "Transfers",
+    items: [
+      {
+        href: "/transfers",
+        label: "Transfers",
+        roles: ["admin", "branch_rep", "top_mgmt"],
+      },
+      {
+        href: "/requests",
+        label: "Stock requests",
+        roles: ["admin", "branch_rep", "top_mgmt"],
+      },
+    ],
+  },
+  {
     section: "Coming soon",
     items: [],
   },

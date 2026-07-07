@@ -255,3 +255,107 @@ npm run dev
 - No client-side or server-side check that a submitted serial number doesn't already exist elsewhere in `stock` — duplicate real-world serials across intakes are not rejected by the RPC or the form. If that's a requirement, it needs a uniqueness constraint or a pre-check query added later.
 - The product picker in the intake form loads the full active product list client-side (no server-side search) — fine at ~555 products (Phase 1 import size), would need a real search endpoint if the catalog grows much larger.
 - `/inventory/aging`'s in-memory pagination re-fetches and re-buckets the full aging view on every page click (no caching) — acceptable for now, flagged above as a spot to revisit if it's slow in practice.
+
+---
+
+# Phase 3 Runbook — Transfers (Tasks 1-5: migrations, list/detail, lifecycle)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build. Stock requests (Task 6, `/requests`) are **not** part of this drop — the nav intentionally does not link to it yet.
+
+## 1. Push the two new migrations, in order
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+`supabase db push` applies pending migrations in filename order, so `0008_stock_reserved.sql` always runs before `0009_transfer_rpcs.sql` in a single invocation — this matters because `0008` adds the `reserved` enum value to `stock_status` and Postgres will not let a new enum value be referenced by name in the same transaction it was created in. `0009`'s functions reference `'reserved'`, so if you ever apply these by hand (e.g. pasting into the SQL editor) run `0008` first, wait for it to commit, then run `0009` separately — do not paste both in one statement batch.
+
+Expected after push: Database → Functions shows `transfer_reserve`, `transfer_dispatch`, `transfer_receive_line`, `request_serve` (language `plpgsql`, security invoker). Table Editor → `transfers` has a new `request_id` column; `transfer_line_items` has a new `received_note` column. Enum check: Database → Enumerated Types → `stock_status` includes `reserved`.
+
+## 2. Build and fix loop
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- `src/app/(app)/transfers/page.tsx` and `src/app/(app)/transfers/[id]/page.tsx` deliberately avoid Postgrest embed disambiguation syntax (`branches!transfers_from_branch_id_fkey(name)`) for the two branch FKs on `transfers` — untested against this project's actual constraint names, and no other file in the codebase uses that syntax. Instead both pages fetch `branches` separately and resolve names via a `Map`. If you'd prefer the embed form, verify the real FK constraint names first (`\d transfers` in `psql` or Table Editor → `transfers` → foreign keys) — they should default to `transfers_from_branch_id_fkey` / `transfers_to_branch_id_fkey` from the plain `references branches(id)` columns, but this was not verified against a live database this session.
+- Same reasoning on `src/app/(app)/transfers/[id]/page.tsx` for line → product names: rather than a two-level embed (`transfer_line_items` → `stock` → `products`), it fetches line rows, collects `stock_id`s, then does one more `stock` query with a `products(name)` embed and joins in memory. If this looks like unnecessary round trips, it's intentional — a nested two-level Postgrest embed's response shape without generated `Database` types was judged too risky to guess at compile time.
+- `src/app/(app)/transfers/actions.ts` calls four RPCs: `transfer_reserve` (`p_transfer_id`), `transfer_dispatch` (`p_transfer_id, p_courier, p_tracking_code, p_sis_no`), `transfer_receive_line` (`p_line_id, p_confirm, p_note`), and (not yet wired to UI — reserved for the Task 6 requests screen) `request_serve` (`p_request_id, p_from_branch_id`). Param names were checked by hand against `0009_transfer_rpcs.sql` and match exactly; a typo here would only surface at runtime as a Postgres "function not found" error since there's no generated `Database` type to catch it at compile time.
+- `src/lib/validators/transfer.ts`'s `receiveLineSchema` uses a custom `booleanFromFormString` preprocessor instead of `z.coerce.boolean()` — `z.coerce.boolean()` on the literal string `"false"` coerces to `true` (any non-empty string is truthy in JS), which would have silently broken the "Report issue" (discrepancy) path. Worth a unit test if you add a validators test suite later.
+- RLS interaction to double check once data exists: `tli_all`'s write check (`0006_rls.sql`) only allows `from_branch_id = auth_branch()` (or admin) to write `transfer_line_items` — a `branch_rep` at the *to*-branch cannot add/remove draft lines even though the detail page's `canManageDraft` flag is UI-only gating (admin or from-branch user). This is intentional defense in depth, but if a to-branch admin-equivalent role ever needs to edit drafts, RLS needs a matching change, not just the UI flag.
+
+## 3. Manual checklist — Transfers list and lifecycle (`/transfers`)
+
+```powershell
+npm run dev
+```
+
+Seed data needed: at least 2 branches, and in the "from" branch at least one serialized stock row (`status = 'available'`) and one non-serialized lot row with `quantity` >= 2 (`status = 'available'`).
+
+- Visit `/transfers` as admin. Nav shows a "Transfers" section (admin/branch_rep/top_mgmt only — a `technical`-role user should be redirected to `/` if they hit `/transfers` or `/transfers/[id]` directly).
+- Click **New transfer** → `/transfers/new`. As admin, both From and To branch selects are open; as a `branch_rep` test user, From branch is locked to their own branch (read-only field, not a select).
+- Create a draft with From ≠ To branch → redirected to `/transfers/[id]`, status badge shows **Draft** (secondary/neutral). Submitting with From = To should show "From and to branches must be different."
+- On the detail page (still draft): use the stock search box (`?stockq=`) to find your serialized item by serial number or product name — confirm results are scoped to the From branch and `status = 'available'` only (an item at a different branch, or already `reserved`/`transferred`, should not appear). Click **Add** on the serialized row (qty field is fixed/hidden at 1) → line appears in the table above with the serial shown.
+- Search for the lot product, enter a quantity less than its available quantity in the row's qty box, click **Add** → line appears with that partial quantity; the lot's own available-stock row should still show (not yet decremented — quantity only splits at Reserve).
+- Try adding a quantity greater than available → server action should reject with "Quantity exceeds available stock." (toast).
+- Remove a line via its **Remove** button → line disappears, no server error.
+- Leave the transfer as a 7+ day old draft (or backdate `created_at` in the SQL editor for a test row) → list view (`/transfers`) should show a **Stale** badge next to Draft.
+- Click **Reserve** (visible to admin or From-branch users while draft) → status flips to **Reserved** (amber). In the SQL editor: confirm the serialized stock row's `status = 'reserved'`; confirm the lot row split — a new `stock` row exists with `status = 'reserved'` and `quantity` = the transferred amount, and the original lot row's `quantity` dropped by that amount; confirm `transfer_line_items.stock_id` for the lot line now points at the new split row.
+- Click **Dispatch** → dialog requires **Courier** (submit blank → browser validation blocks it); Tracking code and SIS no. are optional. Submit with just courier filled → status flips to **In transit** (blue), `transfers.courier/tracking_code/sis_no/transfer_date` populate. In the SQL editor: confirm both `stock` rows (serialized + split lot) are now `status = 'transferred'`, and two new `stock_movements` rows exist with `movement_type = 'transfer_out'`.
+- As a To-branch user (or admin), the detail page should now show the **Receive panel** instead of the plain line table. Click **Received** on the serialized line → status shows "Received"; in the SQL editor confirm that stock row is `branch_id` = To branch, `status = 'available'`, `branch_date_received = today`, and a `transfer_in` movement row was created. Transfer should stay **In transit** (the lot line is still open).
+- On the lot line, click **Report issue**, leave the note blank and submit → browser `required` attribute should block it (or, if bypassed, the RPC raises "discrepancy note required" and it surfaces as a toast). Fill in a note and submit → line shows "Discrepancy" status with the note text; transfer flips to **Confirmed** (green) because every line is now resolved (one confirmed, one noted) — this is intentional per the plan's discrepancy semantics (a noted-but-unconfirmed line still counts as resolved; the flagged stock stays `transferred`, not `available`, pending manual adjustment).
+- Once confirmed, revisit the detail page — action bar should be empty (no Reserve/Dispatch/Receive controls), lines render as the plain read-only table.
+- Draft-only guard: create a second draft, click **Delete draft** → confirms via a browser `window.confirm`, then deletes the transfer and its lines and redirects to `/transfers`. Try calling delete on a non-draft transfer (e.g. by resubmitting an old form) → should be rejected server-side with "Only draft transfers can be deleted."
+
+## 4. Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo (same situation as Phase 2), so every `.from(...)`/`.rpc(...)` call in the new transfer files is loosely typed — Postgrest will accept a typo'd column or RPC param name at compile time and only fail at runtime.
+- The stock search in the line editor re-queries on every `?stockq=` change (full page reload via GET form) rather than client-side filtering — matches the plan's "server-rendered search via `?stockq=` param" spec, but means no live-as-you-type filtering like the intake form's product picker.
+- No pagination on the stock search results beyond the hard `limit(50)` — if a from-branch has more than 50 matching available stock rows for a query, the picker won't show the rest; narrow the search text to find them.
+- `deleteDraft` does two separate deletes (line items, then the transfer) rather than relying solely on the `on delete cascade` already present on `transfer_line_items.transfer_id` — redundant but harmless; kept explicit so the RLS write-check on `transfer_line_items` is exercised the same way for both delete and edit paths.
+- Nav intentionally does not yet link to `/requests` (Stock requests, Task 6) — that's the next task, not part of this drop.
+
+---
+
+# Phase 3 Runbook — Stock requests (Task 6)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build. No new migrations — this task only adds UI/actions on top of the `inventory_requests` / `request_line_items` tables (0004) and the `request_serve` RPC (0009), both already pushed in the previous drop.
+
+## 1. Build and fix loop
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- `src/app/(app)/requests/actions.ts` calls `supabase.rpc('request_serve', { p_request_id, p_from_branch_id })`, matching `0009_transfer_rpcs.sql` exactly. The RPC returns a `uuid` (the new draft transfer's id) — since there's no generated `Database` type in this repo, the client types the RPC result loosely; `serveRequest` guards with `typeof data !== "string"` before redirecting to `/transfers/${data}`. If the RPC ever returns something else shaped, this guard will surface as "Could not serve request." rather than crashing.
+- `src/lib/validators/request.ts`'s `createRequestSchema` accepts `lines` as a JSON string (one hidden `<input type="hidden" name="lines">` field holding `JSON.stringify(...)`) rather than repeated FormData keys — this mirrors the add/remove-lines-client-side requirement without extra per-line form plumbing. `parseLinesJson` safely falls through to the raw value on a parse failure so zod's own array validation produces the error message, not a raw JSON exception.
+- `src/app/(app)/requests/[id]/page.tsx` deliberately avoids a single `Promise.all` across heterogeneous Supabase query shapes for the optional "requested by" profile lookup (it was originally written that way and rewritten to a plain sequential `if` block) — if you see any other file in this codebase doing conditional-query-in-Promise.all, treat this file's version as the safer pattern to copy, not the other way around.
+- `src/app/(app)/requests/[id]/page.tsx` resolves line → product names via a nested `request_line_items` → `products(name)` embed directly (one level, not two like the transfer detail page's stock → products chain) — this is a to-one embed off a table with a single FK to `products`, low risk, but if the embed shape comes back as an array instead of an object at runtime, `firstOrNull` already defends against both shapes (same helper pattern as `transfers/[id]/page.tsx`).
+- RLS reminder (`0006_rls.sql`, `req_all`/`rli_all` policies): a `branch_rep` can only see/write requests where `requesting_branch_id = auth_branch()`; `admin`/`top_mgmt` see all. The UI does not re-filter the list query by branch for `branch_rep` — it relies entirely on RLS. If a `branch_rep` ever sees another branch's requests, check the policy, not the page.
+
+## 2. Manual checklist — Stock requests (`/requests`)
+
+```powershell
+npm run dev
+```
+
+Seed data needed: at least 2 branches, a `branch_rep` test user tied to one of them, and at least one product.
+
+- Nav: confirm "Stock requests" appears under the Transfers section for `admin`, `branch_rep`, and `top_mgmt` roles; a `technical`-role user should be redirected to `/` if they hit `/requests`, `/requests/new`, or `/requests/[id]` directly.
+- **Branch rep creates a 2-line request:** log in as the `branch_rep` test user, click **New request** → `/requests/new`. Confirm "Requesting branch" is locked/read-only to their own branch (not a select). Search a product, click it to add a line (defaults to qty 1), search a second product and add it, adjust one line's quantity, add a notes comment, submit. Expect: redirected to `/requests`, new row visible with today's date, correct branch, line count 2, status **Pending**, a notes icon in the last column.
+- Try submitting with zero lines → **Submit request** button should be disabled (can't submit an empty request).
+- **Admin sees it:** log in as admin, visit `/requests` (no branch filter — admin/top_mgmt see all branches' requests per RLS). Confirm the branch_rep's request appears with the correct "Requested by" name (resolved via the profiles Map, not a Postgrest embed). Filter by status = Pending → row still shows; filter by Processing/Served → row disappears (not yet served).
+- Click into the request (`/requests/[id]`). Confirm: status badge Pending, both lines with correct product names and quantities, notes text shown, and an **Admin notes** card (admin-only) with a textarea + "Save admin notes" button.
+- Type into admin notes and save → toast "Admin notes saved.", page refreshes, text persists on reload.
+- **Serve:** click **Serve request** (visible to admin only, only while status = pending) → dialog opens, "From branch" select excludes the requesting branch itself. Pick a from-branch with available stock, submit. Expect: redirected to `/transfers/[new-id]` — a fresh **Draft** transfer, with "Linked request" shown on its details card (the request's id). Back on `/requests`, the original request now shows status **Processing** and the **Serve request** button/action is gone from its detail page (status is no longer pending).
+- **Complete the linked transfer** (reusing Task 3-5 flows): on the new draft transfer, add lines for the requested products/quantities from the from-branch's available stock, click **Reserve**, then **Dispatch** (courier required), then as a to-branch user or admin use the **Receive panel** to confirm every line (or note a discrepancy — either resolves the line per the existing discrepancy semantics).
+- Once every line is resolved, confirm the transfer flips to **Confirmed** and, in the same action, the linked request auto-flips to **Served** — this is the `transfer_receive_line` RPC's existing `if v_transfer.request_id is not null then update inventory_requests set status = 'served' ...` branch (0009), not new code from this task. Verify on `/requests`: the request's status badge now reads **Served** with no further admin action available.
+
+## 3. Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo (same situation as every prior phase), so every `.from(...)`/`.rpc(...)` call in the new requests files is loosely typed — Postgrest will accept a typo'd column or RPC param name at compile time and only fail at runtime.
+- The product picker in the new-request form loads the full active product list client-side and filters in memory (same approach as the stock intake form) — fine at current catalog size, would need a server-side search endpoint if the catalog grows much larger.
+- No pagination inside a single request's line list (not expected to exceed a handful of lines per request) and no edit/cancel path for a request once submitted — if a branch rep needs to correct a pending request, today the only option is for admin to serve it as-is or leave it pending; consider a "cancel request" action later if that's a real workflow gap.
+- `updateAdminNotes` allows saving admin notes at any status (not just pending/processing) — intentional, since notes are a running log an admin may want to append to even after a request is served.
