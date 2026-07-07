@@ -97,7 +97,7 @@ export async function addLine(
   }
 
   const { data: stockRow, error: stockError } = await supabase
-    .from("stock")
+    .from("stock_visible")
     .select("id, branch_id, status, quantity, serial_number")
     .eq("id", parsed.data.stock_id)
     .single();

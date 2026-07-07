@@ -46,7 +46,7 @@ async function searchAvailableStock(
   }
 
   let stockQuery = supabase
-    .from("stock")
+    .from("stock_visible")
     .select("id, serial_number, quantity, product_id, products(name)")
     .eq("branch_id", fromBranchId)
     .eq("status", "available")

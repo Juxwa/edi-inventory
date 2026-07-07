@@ -65,7 +65,13 @@ export function StatusBadge({ status }: { status: string }) {
   return <Badge variant={variant}>{formatStatusLabel(status)}</Badge>;
 }
 
-export function StockTable({ rows }: { rows: StockRowData[] }) {
+export function StockTable({
+  rows,
+  showCost = true,
+}: {
+  rows: StockRowData[];
+  showCost?: boolean;
+}) {
   if (rows.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border py-16 text-center">
@@ -87,7 +93,9 @@ export function StockTable({ rows }: { rows: StockRowData[] }) {
             <TableHead>Branch</TableHead>
             <TableHead className="text-right">Qty</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead className="text-right">Cost/unit</TableHead>
+            {showCost ? (
+              <TableHead className="text-right">Cost/unit</TableHead>
+            ) : null}
             <TableHead>Received</TableHead>
           </TableRow>
         </TableHeader>
@@ -107,9 +115,11 @@ export function StockTable({ rows }: { rows: StockRowData[] }) {
               <TableCell>
                 <StatusBadge status={row.status} />
               </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {formatCost(row.cost_per_unit)}
-              </TableCell>
+              {showCost ? (
+                <TableCell className="text-right tabular-nums">
+                  {formatCost(row.cost_per_unit)}
+                </TableCell>
+              ) : null}
               <TableCell className="text-muted-foreground">
                 {formatDate(row.branch_date_received)}
               </TableCell>

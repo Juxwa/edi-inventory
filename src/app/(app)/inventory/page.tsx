@@ -110,7 +110,7 @@ export default async function InventoryPage({
   }
 
   let query = supabase
-    .from("stock")
+    .from("stock_visible")
     .select(
       "id, quantity, serial_number, status, cost_per_unit, branch_date_received, products(name), branches(name)",
       { count: "exact" },
@@ -261,7 +261,7 @@ export default async function InventoryPage({
         )}
       </form>
 
-      <StockTable rows={stock} />
+      <StockTable rows={stock} showCost={canFilterByBranch} />
 
       {total > 0 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">

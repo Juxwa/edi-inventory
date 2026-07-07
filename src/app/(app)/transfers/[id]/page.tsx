@@ -118,7 +118,7 @@ export default async function TransferDetailPage({
   let productNameByStockId = new Map<string, string>();
   if (stockIds.length > 0) {
     const { data: stockRows } = await supabase
-      .from("stock")
+      .from("stock_visible")
       .select("id, product_id, products(name)")
       .in("id", stockIds);
     type StockJoinRow = {
