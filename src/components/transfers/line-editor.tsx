@@ -50,6 +50,7 @@ async function searchAvailableStock(
     .select("id, serial_number, quantity, product_id, products(name)")
     .eq("branch_id", fromBranchId)
     .eq("status", "available")
+    .gt("quantity", 0)
     .limit(STOCK_SEARCH_LIMIT);
 
   if (query) {

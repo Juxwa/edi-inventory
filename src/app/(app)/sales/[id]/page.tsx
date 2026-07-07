@@ -1,0 +1,329 @@
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/supabase/profile";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ReturnDialog } from "@/components/sales/return-dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import type { AfterSalesStatus } from "@/lib/validators/sale";
+
+export const dynamic = "force-dynamic";
+
+type SaleDetailPageProps = {
+  params: Promise<{ id: string }>;
+};
+
+type SaleDetailRow = {
+  id: string;
+  customer_id: string | null;
+  branch_id: string;
+  sale_date: string;
+  or_no: string | null;
+  csi_no: string | null;
+  ci_no: string | null;
+  referred_by: string | null;
+  discount: number | null;
+  is_paid: boolean;
+};
+
+type LineRow = {
+  id: string;
+  line_type: "stock" | "service";
+  stock_id: string | null;
+  product_id: string | null;
+  service_id: string | null;
+  quantity: number;
+  unit_price: number;
+  serial_snapshot: string | null;
+  warranty_expiry: string | null;
+  after_sales_status: AfterSalesStatus | null;
+  returned_quantity: number | null;
+};
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString("en-PH", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function AfterSalesBadge({ status }: { status: AfterSalesStatus | null }) {
+  if (!status) return <span className="text-muted-foreground">—</span>;
+  const variant =
+    status === "returned"
+      ? "destructive"
+      : status === "partially_returned"
+        ? "warning"
+        : status === "for_repair"
+          ? "warning"
+          : status === "replaced"
+            ? "secondary"
+            : "outline";
+  const label = status
+    .split("_")
+    .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+  return <Badge variant={variant}>{label}</Badge>;
+}
+
+export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
+  const profile = await getProfile();
+  if (!profile || profile.role === "technical") {
+    redirect("/");
+  }
+
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const { data: sale, error: saleError } = await supabase
+    .from("sales")
+    .select(
+      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, is_paid",
+    )
+    .eq("id", id)
+    .single();
+
+  if (saleError || !sale) {
+    notFound();
+  }
+
+  const saleRow = sale as SaleDetailRow;
+
+  const [branchResult, customerResult, lineResult] = await Promise.all([
+    supabase.from("branches").select("id, name").eq("id", saleRow.branch_id).single(),
+    saleRow.customer_id
+      ? supabase.from("customers").select("id, name").eq("id", saleRow.customer_id).single()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("sale_line_items")
+      .select(
+        "id, line_type, stock_id, product_id, service_id, quantity, unit_price, serial_snapshot, warranty_expiry, after_sales_status, returned_quantity",
+      )
+      .eq("sale_id", saleRow.id),
+  ]);
+
+  const branchName: string = (branchResult.data as { name: string } | null)?.name ?? "—";
+  const customer = customerResult.data as { id: string; name: string } | null;
+
+  const lines: LineRow[] = (lineResult.data as LineRow[] | null) ?? [];
+
+  const productIds = lines
+    .map((line: LineRow) => line.product_id)
+    .filter((productId: string | null): productId is string => productId !== null);
+  const serviceIds = lines
+    .map((line: LineRow) => line.service_id)
+    .filter((serviceId: string | null): serviceId is string => serviceId !== null);
+
+  const [productsResult, servicesResult] = await Promise.all([
+    productIds.length > 0
+      ? supabase.from("products").select("id, name").in("id", productIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    serviceIds.length > 0
+      ? supabase.from("services").select("id, name").in("id", serviceIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+  ]);
+
+  type NameRow = { id: string; name: string };
+  const productNameById = new Map<string, string>(
+    ((productsResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [row.id, row.name]),
+  );
+  const serviceNameById = new Map<string, string>(
+    ((servicesResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [row.id, row.name]),
+  );
+
+  function lineName(line: LineRow): string {
+    if (line.line_type === "service") {
+      return line.service_id ? (serviceNameById.get(line.service_id) ?? "—") : "—";
+    }
+    return line.product_id ? (productNameById.get(line.product_id) ?? "—") : "—";
+  }
+
+  const gross = lines.reduce(
+    (sum: number, line: LineRow) => sum + line.quantity * line.unit_price,
+    0,
+  );
+  const discount = saleRow.discount ?? 0;
+  const net = Math.max(0, gross - discount);
+
+  const canReturn = profile.role === "admin" || profile.branch_id === saleRow.branch_id;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-lg font-semibold">Sale {saleRow.or_no ?? saleRow.id.slice(0, 8)}</h1>
+        <p className="text-sm text-muted-foreground">
+          Recorded {formatDate(saleRow.sale_date)} at {branchName}
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Details</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+          <div>
+            <p className="text-muted-foreground">Customer</p>
+            <p className="font-medium">
+              {customer ? (
+                <Link href={`/customers/${customer.id}`} className="hover:underline">
+                  {customer.name}
+                </Link>
+              ) : (
+                "Walk-in"
+              )}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Sale date</p>
+            <p className="font-medium">{formatDate(saleRow.sale_date)}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Branch</p>
+            <p className="font-medium">{branchName}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Paid</p>
+            <p className="font-medium">
+              {saleRow.is_paid ? (
+                <Badge variant="success">Paid</Badge>
+              ) : (
+                <Badge variant="warning">Unpaid</Badge>
+              )}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">OR no.</p>
+            <p className="font-medium">{saleRow.or_no ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">CSI no.</p>
+            <p className="font-medium">{saleRow.csi_no ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">CI no.</p>
+            <p className="font-medium">{saleRow.ci_no ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Referred by</p>
+            <p className="font-medium">{saleRow.referred_by ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Discount</p>
+            <p className="font-medium">{formatCurrency(discount)}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Lines</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="rounded-lg border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Item</TableHead>
+                  <TableHead>Serial</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Unit price</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Returned</TableHead>
+                  <TableHead className="w-24" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lines.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-muted-foreground">
+                      No lines recorded.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  lines.map((line: LineRow) => {
+                    const returnedQty = line.returned_quantity ?? 0;
+                    const remaining = line.quantity - returnedQty;
+                    const canReturnLine =
+                      line.line_type === "stock" && remaining > 0 && canReturn;
+                    return (
+                      <TableRow key={line.id}>
+                        <TableCell className="font-medium">
+                          {lineName(line)}
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {line.line_type === "stock" ? "Product" : "Service"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {line.serial_snapshot ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {line.quantity}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(line.unit_price)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(line.quantity * line.unit_price)}
+                        </TableCell>
+                        <TableCell>
+                          <AfterSalesBadge status={line.after_sales_status} />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {returnedQty > 0 ? returnedQty : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {canReturnLine ? (
+                            <ReturnDialog
+                              saleId={saleRow.id}
+                              lineId={line.id}
+                              itemLabel={lineName(line)}
+                              remainingQuantity={remaining}
+                            />
+                          ) : null}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="flex flex-col items-end gap-2 text-sm">
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Gross</span>
+              <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Discount</span>
+              <span className="font-medium tabular-nums">{formatCurrency(discount)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
+              <span className="font-semibold">Net</span>
+              <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -359,3 +359,143 @@ Seed data needed: at least 2 branches, a `branch_rep` test user tied to one of t
 - The product picker in the new-request form loads the full active product list client-side and filters in memory (same approach as the stock intake form) — fine at current catalog size, would need a server-side search endpoint if the catalog grows much larger.
 - No pagination inside a single request's line list (not expected to exceed a handful of lines per request) and no edit/cancel path for a request once submitted — if a branch rep needs to correct a pending request, today the only option is for admin to serve it as-is or leave it pending; consider a "cancel request" action later if that's a real workflow gap.
 - `updateAdminNotes` allows saving admin notes at any status (not just pending/processing) — intentional, since notes are a running log an admin may want to append to even after a request is served.
+
+---
+
+# Phase 4 Runbook — Sales, Customers (Tasks 1-2: migration 0011, importers)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint). **None of this has been compiled or run.** Treat the first `npm run build` and first `npm run import` as the real first runs.
+
+## 0. Copy the 5 new CSV exports into `data/exports/`
+
+Copy these files from your uploads into `data/exports/` (same folder Phase 1's exports already live in):
+
+- `export_All-Sales-modified--_2026-07-07_05-01-15.csv`
+- `export_All-Customers-modified_2026-07-07_05-01-56.csv`
+- `export_All-Earmold-Requests-modified_2026-07-07_05-04-14.csv`
+- `export_All-Repair-Requests-modified_2026-07-07_05-03-48.csv`
+- `export_All-Service-Pricings-modified_2026-07-07_05-03-27.csv`
+
+Only the Sales and Customers files are consumed by this drop (`importSales`/`importCustomers` in `scripts/import/run.ts` look for files starting with `export_All-Sales` and `export_All-Customers`). The Repair-Requests, Earmold-Requests, and the refreshed Service-Pricings file are staged for Phase 5 — copying them now just means they're already in place when that importer work starts; they're inert until then. If a file is temporarily missing, `npm run import` logs a `skip <label>: no export file starting with <prefix>` warning and continues rather than throwing (customers and sales are wired as optional at the `main()` level in `run.ts` for exactly this reason — Josh may re-run with only a subset of files present).
+
+## 1. Push migration 0011
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: `0011_sales_rpcs.sql` applies cleanly. This migration does three things:
+- Adds `sale_line_items.product_id` and loosens the line-type check constraint so a stock line can reference just a `product_id` (no `stock_id`) — needed because many legacy sale rows are non-serialized products (batteries etc.) with no stock lot to link back to.
+- Adds `sale_record(...)` (atomic multi-line sale RPC — stock status/quantity flips + line inserts + movement rows) and `sale_return_line(...)` (per-line return with quantity/status bookkeeping). Neither is called by anything yet — Task 3-4 (Record sale UI, returns UI) wires them up next.
+- Changes the `customers_read` policy from branch-scoped to `using (true)` for all authenticated users — a deliberate loosening so branch reps can find walk-in customers originally created at a different branch when recording a sale (writes stay branch-scoped via the untouched `customers_write` policy).
+
+Verify in the dashboard: Database → Functions shows `sale_record` and `sale_return_line`; Table Editor → `sale_line_items` has a `product_id` column; Database → Policies → `customers` → `customers_read` reads `true`.
+
+## 2. Run the new unit tests
+
+```powershell
+npx vitest run tests/import-customers.test.ts tests/import-sales.test.ts
+```
+
+Expected: 4 passed in `import-customers.test.ts` (full row, missing name exception, blank branch → null, unknown branch exception) and 10 passed in `import-sales.test.ts` (2 grouping tests + after-sales-status map coverage + 5 `mapSaleGroup` cases: mixed stock-serial-match + service line, zero-price fallback, unknown branch exception, unresolved stock line exception, unresolved customer name collection).
+
+## 3. Run the full import
+
+```powershell
+npm run import
+```
+
+Import order is unchanged through transfers, then customers, then sales (`importCustomers` before `importSales` — sales resolves customer names against the customers already in the DB, falling back to auto-create for unmatched walk-ins). Expected new lines in the console output:
+
+```
+customers: imported <N>/<N> exceptions -> data/import-reports/customers-exceptions.csv
+sales: imported <H> headers, <L> lines (<R> source rows), zero_price lines: <Z>, auto-created customers: <C>
+```
+
+followed by the validation report now including `customers`, `sales`, `sale_line_items` row counts.
+
+Notes on what to expect:
+- `zero_price lines` counts sale lines where `Total Sale` was blank or zero — these import with `unit_price = 0` rather than being rejected (per the plan, this is a client-review item, not an import failure). It is **not** written to the exceptions CSV; it's a summary count only, so check the console output, not the CSV, for this number.
+- `auto-created customers` counts distinct customer names on sale rows that didn't match any imported customer by exact trimmed name — these get a minimal customer row (`name`, `branch_created_id` from the sale's branch, `legacy_id = autocust:<name>`) so sales history stays linked. Re-running the import is safe: the `autocust:` legacy_id makes this idempotent.
+- Sale headers upsert on `legacy_id = sale:<first row's unique id>` (prefixed to avoid colliding with that same row's line-level legacy_id, since a header and its own first line can originate from the same CSV row). Lines upsert on `legacy_id = <row's unique id>` directly.
+
+## 4. Review exceptions
+
+Check `data/import-reports/customers-exceptions.csv` and `data/import-reports/sales-exceptions.csv`. Expected cases:
+- Customers: any row with a blank `Name`, or a `Branch Created` value that doesn't match an imported branch name.
+- Sales: unknown `BranchSold` values (same long tail as Phase 1's stock `Location` exceptions — e.g. "Head Office Sales"), stock lines where neither `SerialNumber` matches an imported stock row nor `Product Name` matches an imported product, service lines with unrecognized `Service Name` values that somehow weren't picked up by the stub-upsert pass (shouldn't happen — flag if you see any), and rows with `quantity` <= 0.
+
+Re-running is safe (idempotent upserts on `legacy_id`) once you've decided how to handle each exception category — same workflow as Phase 1.
+
+## Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo (same situation as every prior phase), so every `.from(...)` call in `scripts/import/customers.ts` and `scripts/import/sales.ts` is loosely typed against whatever columns you pass — a typo would only surface at runtime.
+- `mapSaleGroup` resolves customer name → id via a map built from `customers` ordered by `created_at` ascending, keeping only the first id seen per name (per the plan's "first match by created order" rule) — if two customers were imported with the exact same name, the second becomes permanently unreachable from sales import; this mirrors real-world duplicate-walk-in-record behavior in the Bubble data and was an accepted tradeoff, not a bug.
+- `sale_record`/`sale_return_line` RPCs from migration 0011 are not called anywhere yet — Phase 4 Tasks 3-4 (Record sale UI, sales history/returns UI) are next and will wire them up. Importing legacy sales does **not** go through these RPCs (bulk `batchUpsert` instead) since replaying 20k+ rows through a row-locking RPC one at a time would be needlessly slow and the legacy data doesn't need the same-transaction stock-status guarantees a live sale does.
+- `sold_by` is left `null` on every imported sale (legacy Bubble `Sold By` is free text, and `profiles` isn't populated from legacy Users) — matches the plan's explicit call-out; only sales recorded through the new UI will have a real `sold_by`.
+
+---
+
+# Phase 4 Runbook — Customers + visits (Task 5)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build. No new SQL migration — this task only adds UI/actions on top of the existing `customers`/`visits` tables (0003) and requires one manual Supabase Storage setup step (below).
+
+## 1. Create the `visit-files` Storage bucket
+
+In the Supabase dashboard → Storage → New bucket:
+- Name: `visit-files`
+- Public: **off** (private bucket — access is via signed URLs only)
+
+Then in the SQL editor, add the storage policies:
+
+```sql
+create policy "visit files read" on storage.objects for select to authenticated
+  using (bucket_id = 'visit-files');
+create policy "visit files write" on storage.objects for insert to authenticated
+  with check (bucket_id = 'visit-files');
+```
+
+Verify: Storage → `visit-files` bucket exists and shows "Private"; Database → Policies → `storage.objects` shows both new policies.
+
+## 2. Build and fix loop
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- `src/app/(app)/customers/actions.ts`'s `logVisit` uses `formData.getAll("files")` typed as `FormDataEntryValue[]`, filtered down to `File[]` via an `entry is File` type guard (also requires `entry.size > 0` so an empty file input doesn't create a zero-byte upload attempt) — Next.js server actions support `File` objects directly in `FormData` when the form has no explicit `encType` set (the browser defaults to `multipart/form-data` whenever a `<input type="file">` is present).
+- `logVisit` creates the `visits` row **before** uploading any files (needed for the `{customer_id}/{visit_id}/{filename}` storage path), then does a second `update` to attach `attachment_paths` only if at least one file uploaded successfully. Upload failures are counted but do not fail the whole action — the visit is kept and a `warning` string is returned in `VisitActionState` for the toast to surface. If you want failed uploads to block the visit entirely, that's a deliberate deviation from the plan's "keep visit, return warning" instruction — don't change it without checking the plan again.
+- No generated `Database` type exists in this repo (same situation as every prior phase), so every `.from(...)`/`.storage.from(...)` call in `src/app/(app)/customers/actions.ts` and `src/components/customers/visit-list.tsx` is loosely typed — Postgrest/Storage will accept a typo'd column, bucket, or path at compile time and only fail at runtime.
+- **RLS gap found during self-review, not fixed in this drop:** migration 0011 loosened `customers_read` to `using (true)` for all authenticated users (so branch reps can find walk-in customers created at another branch when recording a sale), but `visits_all` (0006_rls.sql) still requires `branch_created_id = auth_branch()` on the linked customer for non-admin/non-top_mgmt writes. Net effect: a `branch_rep` can *see* a customer created at a different branch (list, detail, purchase history) but `logVisit` will fail RLS silently (surfaces as the generic "Could not log visit." toast) if they try to log a visit for that customer. If this turns out to matter in practice — e.g. a customer who travels between branches — the fix is a small follow-up migration loosening `visits_all`'s write check the same way 0011 loosened `customers_read`, not a UI change.
+- `src/components/customers/customer-info-card.tsx` overrides `CardHeader`'s default `flex-col` with `flex-row items-center justify-between` via `className` — this is the first place in the codebase to override that base layout; if another card ever needs an inline action button next to its title, copy this pattern rather than adding a new shared component.
+
+## 3. Manual checklist — Customers (`/customers`)
+
+```powershell
+npm run dev
+```
+
+- Nav: confirm a new "Customers" section with a "Customers" link appears for `admin`, `branch_rep`, and `top_mgmt` roles, positioned after "Sales" in the sidebar; a `technical`-role user should be redirected to `/` if they hit `/customers` or `/customers/[id]` directly.
+- Visit `/customers`. Empty state or existing imported customers (from Phase 4 Task 1-2's import) should list, 50 per page, sorted newest-created first.
+- Search box: type part of a name or mobile number, Apply → list filters to matches (case-insensitive, partial match on either field).
+- Click **New customer** → dialog opens. Leave name blank, submit → inline "Name is required" error, dialog stays open. Fill name only, submit → dialog closes, new row appears at the top of the list (sorted by created_at desc).
+- Click a customer's name → navigates to `/customers/[id]`. Confirm the info card shows mobile/email/date of birth/address (or "—" for blanks).
+- Click **Edit** on the info card → dialog opens pre-filled, change a field (e.g. add a mobile number), save → dialog closes, card updates without a full page reload feel (revalidatePath refresh).
+
+## 4. Manual checklist — Visits and purchases (`/customers/[id]`)
+
+Seed data needed: at least one customer, ideally one with an existing sale recorded against them (from Phase 4 Task 3-4's Record sale flow) to exercise the purchases section.
+
+- **Log a visit with a photo:** on a customer detail page, scroll to "Log a visit". Confirm Visit date defaults to today. Pick a purpose from the dropdown (Consultation, Hearing Test, Fitting, Follow-up, Repair Drop-off, Pickup, Other), type a remark, attach one image file, check "Purchase made during this visit", submit. Expect: success toast "Visit logged.", form resets to defaults, a new entry appears at the top of "Visit history" with the date, purpose badge, a green "Purchase made" badge, the remark text, and a clickable attachment link showing the filename.
+- **Attachment link opens:** click the attachment filename link → opens the file in a new tab via a signed URL (valid 1 hour). If it shows "(unavailable)" instead of a link, check that the `visit-files` bucket and its two storage policies from step 1 were actually created — this is the most likely failure mode on first run.
+- **Multiple files:** log a second visit attaching 2 files (one image, one PDF) → both should appear as separate links under that visit entry.
+- **No purpose / no files:** log a visit with only the date filled (leave purpose at its default "Consultation", no files, no remarks) → should still succeed with no attachment links shown for that entry.
+- **Purchases show after recording a sale:** from `/sales/new`, record a new sale against this same customer (any line), submit. Return to `/customers/[id]` → the "Purchases" section should now show a new row with the sale's date, OR no. (or "—"), and net total matching the sale detail page's net figure; clicking the date links to `/sales/[id]`.
+
+## 5. Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo — same caveat as every prior phase's runbook section.
+- Purchases section is capped at the latest 20 sales per customer (`PURCHASES_LIMIT` in `src/app/(app)/customers/[id]/page.tsx`) with no pagination — acceptable for now given expected purchase volume per customer; revisit if a customer accumulates more than 20 lifetime purchases and needs to see older ones.
+- The RLS gap noted above (branch_rep cannot log visits for customers created at another branch, despite being able to see them) is the one item from this task worth a product decision before go-live — flag it to Josh explicitly, don't assume it's fine.
+- `sanitizeFilename` strips everything except alphanumerics, `.`, `_`, `-` — a file named e.g. `José's photo (1).jpg` becomes `Jos_'s_photo__1_.jpg`... actually apostrophes and parens also get replaced, so it becomes `Jos_s_photo_1_.jpg`. This is intentional (safe storage keys) but means the original filename shown as the link text in `visit-list.tsx` is the *sanitized* name, not what the user originally uploaded — acceptable tradeoff, just don't be surprised if the displayed filename looks slightly mangled for names with special characters.

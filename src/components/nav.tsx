@@ -43,6 +43,31 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    section: "Sales",
+    items: [
+      {
+        href: "/sales/new",
+        label: "Record sale",
+        roles: ["admin", "branch_rep"],
+      },
+      {
+        href: "/sales",
+        label: "Sales history",
+        roles: ["admin", "branch_rep", "top_mgmt"],
+      },
+    ],
+  },
+  {
+    section: "Customers",
+    items: [
+      {
+        href: "/customers",
+        label: "Customers",
+        roles: ["admin", "branch_rep", "top_mgmt"],
+      },
+    ],
+  },
+  {
     section: "Transfers",
     items: [
       {
