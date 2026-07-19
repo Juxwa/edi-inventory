@@ -68,6 +68,12 @@ export default function LoginPage() {
             <Button type="submit" className="mt-1 w-full" disabled={pending}>
               {pending ? "Signing in..." : "Sign in"}
             </Button>
+            <a
+              href="/forgot-password"
+              className="text-center text-sm font-medium text-primary hover:underline"
+            >
+              Forgot password?
+            </a>
           </form>
         </CardContent>
       </Card>

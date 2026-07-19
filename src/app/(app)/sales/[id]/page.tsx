@@ -5,6 +5,7 @@ import { getProfile } from "@/lib/supabase/profile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ReturnDialog } from "@/components/sales/return-dialog";
+import { PrintButton } from "@/components/print-button";
 import {
   Table,
   TableBody,
@@ -31,6 +32,7 @@ type SaleDetailRow = {
   ci_no: string | null;
   referred_by: string | null;
   discount: number | null;
+  vat_amount: number | null;
   is_paid: boolean;
 };
 
@@ -96,7 +98,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const { data: sale, error: saleError } = await supabase
     .from("sales")
     .select(
-      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, is_paid",
+      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, vat_amount, is_paid",
     )
     .eq("id", id)
     .single();
@@ -167,11 +169,22 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-lg font-semibold">Sale {saleRow.or_no ?? saleRow.id.slice(0, 8)}</h1>
-        <p className="text-sm text-muted-foreground">
-          Recorded {formatDate(saleRow.sale_date)} at {branchName}
-        </p>
+      {/* Print-only letterhead for the receipt */}
+      <div className="hidden print:block">
+        <p className="text-lg font-bold">Ear Diagnostics Inc.</p>
+        <p className="text-sm">{branchName} · Sales receipt</p>
+      </div>
+
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-lg font-semibold">Sale {saleRow.or_no ?? saleRow.id.slice(0, 8)}</h1>
+          <p className="text-sm text-muted-foreground">
+            Recorded {formatDate(saleRow.sale_date)} at {branchName}
+          </p>
+        </div>
+        <span className="print:hidden">
+          <PrintButton />
+        </span>
       </div>
 
       <Card>
@@ -320,6 +333,20 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
             <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
               <span className="font-semibold">Net</span>
               <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">VAT</span>
+              <span className="font-medium tabular-nums">
+                {saleRow.vat_amount !== null ? formatCurrency(saleRow.vat_amount) : "—"}
+              </span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Net of VAT</span>
+              <span className="font-medium tabular-nums">
+                {saleRow.vat_amount !== null
+                  ? formatCurrency(Math.max(0, net - saleRow.vat_amount))
+                  : "—"}
+              </span>
             </div>
           </div>
         </CardContent>

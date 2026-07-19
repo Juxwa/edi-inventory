@@ -60,6 +60,13 @@ const positiveQuantity = z.preprocess((value: unknown) => {
   return Number.isNaN(parsed) ? text : parsed;
 }, z.number().positive("Quantity must be greater than zero"));
 
+const optionalNonNegativeNumber = z.preprocess((value: unknown) => {
+  const text = toOptionalText(value);
+  if (text === null) return null;
+  const parsed = Number.parseFloat(text);
+  return Number.isNaN(parsed) ? text : parsed;
+}, z.number().min(0, "Must be zero or greater").nullable());
+
 const booleanFromFormString = z.preprocess((value: unknown) => {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") return value.trim().toLowerCase() === "true";
@@ -120,6 +127,7 @@ export const recordSaleSchema = z.object({
   ci_no: optionalText,
   referred_by: optionalText,
   discount: nonNegativeNumber,
+  vat_amount: optionalNonNegativeNumber,
   is_paid: booleanFromFormString,
   lines: z.preprocess(
     parseLinesJson,

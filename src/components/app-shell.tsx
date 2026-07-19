@@ -2,6 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { Nav } from "@/components/nav";
 import { Header } from "@/components/header";
+import { ChatWidget } from "@/components/chat/chat-widget";
+import { WelcomeTour } from "@/components/help/welcome-tour";
 import type { Profile } from "@/lib/supabase/profile";
 
 type AppShellProps = {
@@ -13,7 +15,7 @@ type AppShellProps = {
 export function AppShell({ profile, branchName, children }: AppShellProps) {
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+      <aside className="flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground print:hidden">
         <div className="flex h-14 shrink-0 items-center gap-2 border-b border-sidebar-border px-4">
           <Link
             href="/"
@@ -36,6 +38,13 @@ export function AppShell({ profile, branchName, children }: AppShellProps) {
         <Header profile={profile} branchName={branchName} />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
+
+      <ChatWidget
+        currentUserId={profile.id}
+        role={profile.role}
+        branchId={profile.branch_id}
+      />
+      <WelcomeTour role={profile.role} />
     </div>
   );
 }

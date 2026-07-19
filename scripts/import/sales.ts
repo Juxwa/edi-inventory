@@ -79,7 +79,21 @@ export function mapSaleGroup(group: SaleGroup, ctx: SaleCtx): MapSaleGroupResult
   const or_no = clean(firstRow['OR/CSI/CI v2']);
   const discount = toNum(firstRow['Discount']) ?? 0;
   const is_paid = toBool(firstRow['Paid']);
-  const sale_date = parseBubbleDate(firstRow['SaleDate']);
+  const sale_date =
+    parseBubbleDate(firstRow['SaleDate']) ?? parseBubbleDate(firstRow['Creation Date']);
+  if (!sale_date) {
+    return {
+      header: {},
+      lines: [],
+      zeroPriceCount: 0,
+      unresolvedCustomerName: null,
+      exceptions: [{
+        row: firstIndex + 2,
+        reason: 'no sale date or creation date',
+        data: JSON.stringify(firstRow),
+      }],
+    };
+  }
   const referred_by = clean(firstRow['Referred By']);
   const legacy_id = `sale:${clean(firstRow['unique id']) ?? String(firstIndex)}`;
 

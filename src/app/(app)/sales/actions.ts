@@ -40,6 +40,7 @@ export async function recordSale(
     ci_no: formData.get("ci_no"),
     referred_by: formData.get("referred_by"),
     discount: formData.get("discount"),
+    vat_amount: formData.get("vat_amount"),
     is_paid: formData.get("is_paid"),
     lines: formData.get("lines"),
   });
@@ -94,6 +95,7 @@ export async function recordSale(
     p_ci_no: data.ci_no,
     p_referred_by: data.referred_by,
     p_discount: data.discount,
+    p_vat_amount: data.vat_amount,
     p_is_paid: data.is_paid,
     p_lines: lines,
   });

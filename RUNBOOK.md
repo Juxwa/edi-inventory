@@ -499,3 +499,38 @@ Seed data needed: at least one customer, ideally one with an existing sale recor
 - Purchases section is capped at the latest 20 sales per customer (`PURCHASES_LIMIT` in `src/app/(app)/customers/[id]/page.tsx`) with no pagination — acceptable for now given expected purchase volume per customer; revisit if a customer accumulates more than 20 lifetime purchases and needs to see older ones.
 - The RLS gap noted above (branch_rep cannot log visits for customers created at another branch, despite being able to see them) is the one item from this task worth a product decision before go-live — flag it to Josh explicitly, don't assume it's fine.
 - `sanitizeFilename` strips everything except alphanumerics, `.`, `_`, `-` — a file named e.g. `José's photo (1).jpg` becomes `Jos_'s_photo__1_.jpg`... actually apostrophes and parens also get replaced, so it becomes `Jos_s_photo_1_.jpg`. This is intentional (safe storage keys) but means the original filename shown as the link text in `visit-list.tsx` is the *sanitized* name, not what the user originally uploaded — acceptable tradeoff, just don't be surprised if the displayed filename looks slightly mangled for names with special characters.
+
+---
+
+# Phase 5–7 — Repairs, portal, reports/VAT, user admin (2026-07-11)
+
+## 1. Environment / config additions
+
+- **Server env (Vercel/production AND `.env.local`)**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (already used by tests/imports; now also used at runtime by `src/lib/supabase/admin.ts` — the ONLY module allowed to import it, guarded by `server-only`), and `SITE_URL` (e.g. `https://app.example.com`; falls back to `http://localhost:3000`). Never prefix these with `NEXT_PUBLIC_`.
+- **Supabase Auth dashboard**: add `<SITE_URL>/auth/confirm` and `<SITE_URL>/reset-password` to the redirect URL allowlist, or invite/recovery email links will bounce.
+- Migrations `0013`–`0017` (`npm run db:push`): repairs RPCs + `profiles_read` policy + `rate_limits`; VAT param on `sale_record` + `sales_totals` rebuilt with `security_invoker = on` (fixes a definer-semantics leak) ; report views + `stock_movements` indexes; `auth_role()/auth_branch()` enforce `is_active`; RLS InitPlan rewrite for the 28k-row sales tables (statement-timeout fix) + `sales(branch_id)`/`sales(sale_date)` indexes.
+
+## 2. Manual checklist — Repairs (`/repairs`) + public portal (`/repair-status`)
+
+- Intake from a sold serialized item ("From sale" tab prefills customer + contact) or via manual serial. Blank SAR auto-generates `SAR-YYMMDD-XXXX`; a duplicate manual SAR shows a clean error.
+- Detail page: add status updates (Received → Assessed → In Repair → Ready → Returned); "Returned" flips the header to Completed and stamps the return date. Uncheck "Visible to customer" for internal notes — they get a lock badge and never reach the portal.
+- "Copy status link" emits `/repair-status?sar=...`. Open it in incognito: SAR prefilled, wrong phone → generic "No repair found" (same message for unknown SAR / rate limit — anti-enumeration), correct phone (any format: +63/0917/spaced) → public timeline only. Per-SAR limit: 5 attempts/hour; per-IP: 10/10min.
+
+## 3. Manual checklist — VAT + reports
+
+- `/sales/new`: VAT auto-computes 12/112 of (gross − discount) and re-syncs until manually edited; "VAT-exempt (set to 0)" and "Recompute" links. Detail page shows VAT and Net-of-VAT; legacy sales show "—".
+- **Never backfill `vat_amount` on imported sales** — null means "not captured", and reports footnote it.
+- `/reports/sales`: monthly chart + table with gross/discounts/net/VAT/net-of-VAT and CSV export at per-sale grain (the accounting export). `/reports/movements`: filterable ledger + CSV. Branch reps are auto-scoped; the branch filter only renders for admin/top_mgmt.
+
+## 4. Manual checklist — User admin (`/admin/users`) + password reset
+
+- Admin-only. Invite (sends Supabase invite email → user lands on `/reset-password` to set a password), edit role/branch, deactivate/reactivate. Deactivation bans the auth user (blocks sign-in + refresh) AND `is_active=false` fails every `auth_role()` RLS check; residual exposure is bounded by the ~1h access-token TTL on the few `using (true)` policies.
+- You cannot deactivate your own account (guarded server-side).
+- "Forgot password?" on the login page → `/forgot-password` (always reports success — no account enumeration) → email link → `/auth/confirm` → `/reset-password`.
+
+## 5. Known gaps / notes
+
+- Repair intake deliberately does not touch `stock` or write `repair_in`/`repair_out` movements (customer-owned units); those movement types are reserved for repair-pool loaner tracking.
+- Repair intake's "From sale" search preloads the newest 500 serialized sold lines (`SOLD_ITEM_CAP`); switch to server-side search if intake regularly needs older sales.
+- `rate_limits` is fixed-window and self-cleaning; no cron needed.
+- If any other report over `sales`/`sale_line_items`/`stock` times out for branch users, apply the `(select auth_role())` InitPlan rewrite from `0017` to that table's policies — `stock`'s policies still use the per-row form.

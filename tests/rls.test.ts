@@ -45,4 +45,20 @@ describe('RLS branch scoping', () => {
     const { data } = await mgmt.from('stock').select('id').eq('legacy_id', 'rls-test-stock');
     expect(data!.length).toBe(1);
   });
+
+  it('deactivated user fails auth_role checks (fail closed)', async () => {
+    const mgmt = await makeUser('rls-deactivated@test.local', 'top_mgmt', branchA);
+    const { data: before } = await mgmt.from('stock')
+      .select('id').eq('legacy_id', 'rls-test-stock');
+    expect(before!.length).toBe(1);
+
+    await service.from('profiles').update({ is_active: false })
+      .eq('legacy_id', 'rls-deactivated@test.local');
+    const { data: after } = await mgmt.from('stock')
+      .select('id').eq('legacy_id', 'rls-test-stock');
+    expect(after).toEqual([]);
+
+    await service.from('profiles').update({ is_active: true })
+      .eq('legacy_id', 'rls-deactivated@test.local');
+  });
 });

@@ -83,8 +83,59 @@ const NAV: NavSection[] = [
     ],
   },
   {
-    section: "Coming soon",
-    items: [],
+    section: "Repairs",
+    items: [
+      {
+        href: "/repairs",
+        label: "Repairs",
+        roles: ["admin", "branch_rep", "top_mgmt", "technical"],
+      },
+      {
+        href: "/repairs/new",
+        label: "Repair intake",
+        roles: ["admin", "branch_rep", "technical"],
+      },
+      {
+        href: "/earmolds",
+        label: "Earmolds",
+        roles: ["admin", "branch_rep", "top_mgmt", "technical"],
+      },
+    ],
+  },
+  {
+    section: "Reports",
+    items: [
+      {
+        href: "/reports/sales",
+        label: "Sales report",
+        roles: ["admin", "branch_rep", "top_mgmt"],
+      },
+      {
+        href: "/reports/movements",
+        label: "Stock movements",
+        roles: ["admin", "branch_rep", "top_mgmt"],
+      },
+    ],
+  },
+  {
+    section: "Admin",
+    items: [
+      {
+        href: "/admin/users",
+        label: "Users",
+        roles: ["admin"],
+      },
+    ],
+  },
+  {
+    section: "Support",
+    items: [
+      {
+        href: "/help",
+        label: "User guide",
+        roles: ["admin", "branch_rep", "top_mgmt", "technical"],
+      },
+    ],
   },
 ];
 

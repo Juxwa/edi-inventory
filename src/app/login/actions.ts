@@ -30,3 +30,23 @@ export async function signIn(
 
   redirect("/");
 }
+
+export type ResetRequestState = {
+  done?: boolean;
+};
+
+export async function requestPasswordReset(
+  _prevState: ResetRequestState,
+  formData: FormData,
+): Promise<ResetRequestState> {
+  const email = String(formData.get("email") ?? "").trim();
+  if (email) {
+    const supabase = await createClient();
+    const siteUrl = process.env.SITE_URL ?? "http://localhost:3000";
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${siteUrl}/reset-password`,
+    });
+  }
+  // Always report success — no account enumeration.
+  return { done: true };
+}

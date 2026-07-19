@@ -293,6 +293,9 @@ export function SaleForm({
   const [useNewCustomer, setUseNewCustomer] = useState(false);
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [discount, setDiscount] = useState("0");
+  // VAT auto-computes (12/112 of net, PH VAT-inclusive) until manually edited.
+  const [vatManual, setVatManual] = useState("");
+  const [vatTouched, setVatTouched] = useState(false);
   const [serviceSelectValue, setServiceSelectValue] = useState<string>("");
 
   useEffect(() => {
@@ -380,6 +383,11 @@ export function SaleForm({
   const discountValue = Number.parseFloat(discount) || 0;
   const net = Math.max(0, gross - discountValue);
   const discountExceedsGross = discountValue > gross;
+
+  const defaultVat = Math.round(((net * 12) / 112) * 100) / 100;
+  const vat = vatTouched ? vatManual : defaultVat.toFixed(2);
+  const vatValue = Number.parseFloat(vat) || 0;
+  const netOfVat = Math.max(0, net - vatValue);
 
   const linesJson = useMemo(
     () =>
@@ -630,6 +638,55 @@ export function SaleForm({
           <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
             <span className="font-semibold">Net</span>
             <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
+          </div>
+          <div className="flex w-full max-w-xs items-center justify-between gap-3">
+            <Label htmlFor="vat_amount" className="text-muted-foreground">
+              VAT (12/112)
+            </Label>
+            <Input
+              id="vat_amount"
+              name="vat_amount"
+              type="number"
+              min="0"
+              step="0.01"
+              value={vat}
+              disabled={pending}
+              onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                setVatTouched(true);
+                setVatManual(event.target.value);
+              }}
+              className="h-8 w-28 text-right"
+            />
+          </div>
+          <div className="flex w-full max-w-xs items-center justify-between">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setVatTouched(true);
+                setVatManual("0");
+              }}
+              className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
+            >
+              VAT-exempt (set to 0)
+            </button>
+            {vatTouched ? (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  setVatTouched(false);
+                  setVatManual("");
+                }}
+                className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
+              >
+                Recompute
+              </button>
+            ) : null}
+          </div>
+          <div className="flex w-full max-w-xs items-center justify-between">
+            <span className="text-muted-foreground">Net of VAT</span>
+            <span className="font-medium tabular-nums">{formatCurrency(netOfVat)}</span>
           </div>
         </div>
       </div>

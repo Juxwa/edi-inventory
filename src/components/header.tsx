@@ -1,5 +1,6 @@
 import { LogOutIcon, UserIcon } from "lucide-react";
 import { signOut } from "@/app/(app)/actions";
+import { HelpButton } from "@/components/help/help-button";
 import type { Profile } from "@/lib/supabase/profile";
 import {
   DropdownMenu,
@@ -25,7 +26,7 @@ const ROLE_LABEL: Record<Profile["role"], string> = {
 
 export function Header({ profile, branchName }: HeaderProps) {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4 print:hidden">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         {branchName ? (
           <>
@@ -36,36 +37,39 @@ export function Header({ profile, branchName }: HeaderProps) {
         <span>{ROLE_LABEL[profile.role]}</span>
       </div>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="gap-2"
-            aria-label="Account menu"
-          >
-            <UserIcon />
-            <span>{profile.name ?? "User"}</span>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuLabel className="font-normal">
-            <p className="text-sm font-medium">{profile.name ?? "User"}</p>
-            <p className="text-xs text-muted-foreground">
-              {ROLE_LABEL[profile.role]}
-            </p>
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <form action={signOut}>
-            <DropdownMenuItem asChild variant="destructive">
-              <button type="submit" className="w-full cursor-default">
-                <LogOutIcon />
-                Sign out
-              </button>
-            </DropdownMenuItem>
-          </form>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center gap-1">
+        <HelpButton />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-2"
+              aria-label="Account menu"
+            >
+              <UserIcon />
+              <span>{profile.name ?? "User"}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel className="font-normal">
+              <p className="text-sm font-medium">{profile.name ?? "User"}</p>
+              <p className="text-xs text-muted-foreground">
+                {ROLE_LABEL[profile.role]}
+              </p>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <form action={signOut}>
+              <DropdownMenuItem asChild variant="destructive">
+                <button type="submit" className="w-full cursor-default">
+                  <LogOutIcon />
+                  Sign out
+                </button>
+              </DropdownMenuItem>
+            </form>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </header>
   );
 }

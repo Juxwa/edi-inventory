@@ -2,13 +2,15 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   BoxIcon,
-  Building2Icon,
-  PackageIcon,
   TimerIcon,
   InboxIcon,
   TruckIcon,
   FileClockIcon,
+  WrenchIcon,
+  EarIcon,
+  BanknoteIcon,
 } from "lucide-react";
+import { formatCurrency } from "@/lib/format";
 import { getProfile, getBranchName } from "@/lib/supabase/profile";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/app-shell";
@@ -59,7 +61,10 @@ export default async function HomePage() {
     createClient(),
   ]);
 
-  const [availableStock, branches, products, aging] = await Promise.all([
+  const monthStart = new Date();
+  const monthStartIso = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-01`;
+
+  const [availableStock, openRepairs, aging, netSalesRows] = await Promise.all([
     safeCount(async () => {
       const res = await supabase
         .from("stock_visible")
@@ -69,15 +74,9 @@ export default async function HomePage() {
     }),
     safeCount(async () => {
       const res = await supabase
-        .from("branches")
-        .select("id", { count: "exact", head: true });
-      return { count: res.count, error: res.error };
-    }),
-    safeCount(async () => {
-      const res = await supabase
-        .from("products")
+        .from("repair_requests")
         .select("id", { count: "exact", head: true })
-        .eq("archived", false);
+        .in("status", ["pending", "in_progress", "for_replacement"]);
       return { count: res.count, error: res.error };
     }),
     safeCount(async () => {
@@ -87,13 +86,30 @@ export default async function HomePage() {
         .gt("days_on_hand", 180);
       return { count: res.count, error: res.error };
     }),
+    supabase
+      .from("sales_by_month")
+      .select("net_sales")
+      .eq("month", monthStartIso)
+      .then(
+        (res: { data: { net_sales: number }[] | null }) => res.data ?? [],
+        () => [] as { net_sales: number }[],
+      ),
   ]);
 
+  const netSalesThisMonth = netSalesRows.reduce(
+    (sum: number, row: { net_sales: number }) => sum + Number(row.net_sales),
+    0,
+  );
+
   const stats = [
-    { label: "Available stock", value: availableStock, icon: BoxIcon },
-    { label: "Branches", value: branches, icon: Building2Icon },
-    { label: "Active products", value: products, icon: PackageIcon },
-    { label: "Aging over 180 days", value: aging, icon: TimerIcon },
+    { label: "Available stock", value: availableStock.toLocaleString(), icon: BoxIcon },
+    {
+      label: "Net sales this month",
+      value: formatCurrency(netSalesThisMonth),
+      icon: BanknoteIcon,
+    },
+    { label: "Open repairs", value: openRepairs.toLocaleString(), icon: WrenchIcon },
+    { label: "Aging over 180 days", value: aging.toLocaleString(), icon: TimerIcon },
   ];
 
   const branchNameById = new Map<string, string>();
@@ -123,12 +139,27 @@ export default async function HomePage() {
     created_at: string;
   };
 
+  type RepairRow = {
+    id: string;
+    sar_no: string | null;
+    requesting_branch_id: string | null;
+    request_date: string;
+  };
+  type EarmoldRow = {
+    id: string;
+    patient_name: string;
+    requesting_branch_id: string | null;
+    created_at: string;
+  };
+
   let pendingRequests: RequestRow[] = [];
   let inTransit: TransferRow[] = [];
   let staleDrafts: TransferRow[] = [];
+  let openRepairRows: RepairRow[] = [];
+  let pendingEarmolds: EarmoldRow[] = [];
   try {
     const staleCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const [reqRes, transitRes, draftRes] = await Promise.all([
+    const [reqRes, transitRes, draftRes, repairRes, earmoldRes] = await Promise.all([
       supabase
         .from("inventory_requests")
         .select("id, request_date, requesting_branch_id, status")
@@ -148,12 +179,34 @@ export default async function HomePage() {
         .lt("created_at", staleCutoff)
         .order("created_at", { ascending: true })
         .limit(5),
+      supabase
+        .from("repair_requests")
+        .select("id, sar_no, requesting_branch_id, request_date")
+        .in("status", ["pending", "in_progress", "for_replacement"])
+        .order("request_date", { ascending: true })
+        .limit(5),
+      supabase
+        .from("earmold_requests")
+        .select("id, patient_name, requesting_branch_id, created_at")
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(5),
     ]);
     pendingRequests = (reqRes.data as RequestRow[] | null) ?? [];
     inTransit = (transitRes.data as TransferRow[] | null) ?? [];
     staleDrafts = (draftRes.data as TransferRow[] | null) ?? [];
+    openRepairRows = (repairRes.data as RepairRow[] | null) ?? [];
+    pendingEarmolds = (earmoldRes.data as EarmoldRow[] | null) ?? [];
   } catch {
     // panels render empty on query failure
+  }
+
+  function daysOpen(since: string): string {
+    const days = Math.max(
+      0,
+      Math.floor((Date.now() - new Date(since).getTime()) / (24 * 60 * 60 * 1000)),
+    );
+    return days === 1 ? "1 day open" : `${days} days open`;
   }
 
   const panels: ActionPanel[] = [
@@ -193,6 +246,30 @@ export default async function HomePage() {
         secondary: `${nameOf(t.from_branch_id)} → ${nameOf(t.to_branch_id)}`,
       })),
     },
+    {
+      title: "Open repairs",
+      icon: WrenchIcon,
+      count: openRepairRows.length,
+      emptyText: "No open repairs.",
+      viewAllHref: "/repairs",
+      items: openRepairRows.map((r: RepairRow) => ({
+        href: `/repairs/${r.id}`,
+        primary: r.sar_no ?? "No SAR",
+        secondary: daysOpen(r.request_date),
+      })),
+    },
+    {
+      title: "Pending earmolds",
+      icon: EarIcon,
+      count: pendingEarmolds.length,
+      emptyText: "No pending earmolds.",
+      viewAllHref: "/earmolds?status=pending",
+      items: pendingEarmolds.map((e: EarmoldRow) => ({
+        href: `/earmolds/${e.id}`,
+        primary: e.patient_name,
+        secondary: daysOpen(e.created_at),
+      })),
+    },
   ];
 
   return (
@@ -219,7 +296,7 @@ export default async function HomePage() {
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-semibold tabular-nums">
-                  {stat.value.toLocaleString()}
+                  {stat.value}
                 </p>
               </CardContent>
             </Card>

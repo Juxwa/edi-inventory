@@ -1,7 +1,13 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/repair-status"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/repair-status",
+  "/forgot-password",
+  "/reset-password",
+  "/auth",
+];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some(
@@ -53,10 +59,10 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except:
-     * - /login, /repair-status (public)
+     * - /login, /repair-status, /forgot-password, /reset-password, /auth (public)
      * - _next/static, _next/image (Next.js internals)
      * - favicon.ico and other static assets
      */
-    "/((?!login|repair-status|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!login|repair-status|forgot-password|reset-password|auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

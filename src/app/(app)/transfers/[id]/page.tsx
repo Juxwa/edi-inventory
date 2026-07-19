@@ -1,7 +1,13 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/supabase/profile";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   TransferStatusBadge,
   StaleDraftBadge,
@@ -14,8 +20,10 @@ import {
   type TransferLineRowData,
 } from "@/components/transfers/line-editor";
 import { ReceivePanel, type ReceiveLineRowData } from "@/components/transfers/receive-panel";
+import { ChatThread } from "@/components/chat/chat-thread";
 import { DispatchDialog } from "@/components/transfers/dispatch-dialog";
 import { ReserveButton, DeleteDraftButton } from "@/components/transfers/lifecycle-buttons";
+import { PrintButton } from "@/components/print-button";
 import type { TransferStatus } from "@/lib/validators/transfer";
 
 export const dynamic = "force-dynamic";
@@ -155,6 +163,12 @@ export default async function TransferDetailPage({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Print-only letterhead for the transfer slip */}
+      <div className="hidden print:block">
+        <p className="text-lg font-bold">Ear Diagnostics Inc.</p>
+        <p className="text-sm">Stock transfer slip</p>
+      </div>
+
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -170,7 +184,7 @@ export default async function TransferDetailPage({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 print:hidden">
           {transferRow.status === "draft" && canManageDraft ? (
             <>
               <ReserveButton transferId={transferRow.id} />
@@ -180,6 +194,7 @@ export default async function TransferDetailPage({
           {transferRow.status === "reserved" && canManageDraft ? (
             <DispatchDialog transferId={transferRow.id} />
           ) : null}
+          <PrintButton />
         </div>
       </div>
 
@@ -235,6 +250,24 @@ export default async function TransferDetailPage({
           ) : (
             <TransferLinesTable lines={lines} />
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="print:hidden">
+        <CardHeader>
+          <CardTitle>Messages</CardTitle>
+          <CardDescription>
+            Discuss this transfer with head office and the other branch.
+            Everyone who can open this transfer sees this thread.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <ChatThread
+            channel={{ kind: "transfer", transferId: transferRow.id }}
+            currentUserId={profile.id}
+            emptyLabel="No messages on this transfer yet."
+            className="h-80"
+          />
         </CardContent>
       </Card>
     </div>
