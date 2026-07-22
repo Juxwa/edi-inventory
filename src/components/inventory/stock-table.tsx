@@ -9,6 +9,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { VariantProps } from "class-variance-authority";
 import type { badgeVariants } from "@/components/ui/badge";
+import { SerialCorrectDialog } from "@/components/admin/serial-correct-dialog";
+import { VoidDialog } from "@/components/admin/void-dialog";
+import { voidIntake } from "@/app/(app)/admin/corrections/actions";
 
 export type StockRowData = {
   id: string;
@@ -68,9 +71,11 @@ export function StatusBadge({ status }: { status: string }) {
 export function StockTable({
   rows,
   showCost = true,
+  showAdminActions = false,
 }: {
   rows: StockRowData[];
   showCost?: boolean;
+  showAdminActions?: boolean;
 }) {
   if (rows.length === 0) {
     return (
@@ -97,6 +102,7 @@ export function StockTable({
               <TableHead className="text-right">Cost/unit</TableHead>
             ) : null}
             <TableHead>Received</TableHead>
+            {showAdminActions ? <TableHead className="w-32" /> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -104,7 +110,17 @@ export function StockTable({
             <TableRow key={row.id}>
               <TableCell className="font-medium">{row.product_name}</TableCell>
               <TableCell className="text-muted-foreground">
-                {row.serial_number ?? "—"}
+                <div className="flex items-center gap-1">
+                  {row.serial_number ?? "—"}
+                  {showAdminActions ? (
+                    <SerialCorrectDialog
+                      scope="stock"
+                      id={row.id}
+                      currentSerial={row.serial_number}
+                      returnPath="/inventory"
+                    />
+                  ) : null}
+                </div>
               </TableCell>
               <TableCell className="text-muted-foreground">
                 {row.branch_name}
@@ -123,6 +139,20 @@ export function StockTable({
               <TableCell className="text-muted-foreground">
                 {formatDate(row.branch_date_received)}
               </TableCell>
+              {showAdminActions ? (
+                <TableCell>
+                  <VoidDialog
+                    action={voidIntake}
+                    hiddenFields={{ stock_id: row.id }}
+                    triggerLabel="Void intake"
+                    title="Void this stock intake"
+                    description="Only stock with no activity beyond its own intake can be voided. This deletes the stock row entirely."
+                    confirmLabel="Void intake"
+                    pendingLabel="Voiding..."
+                    variant="outline"
+                  />
+                </TableCell>
+              ) : null}
             </TableRow>
           ))}
         </TableBody>

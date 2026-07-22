@@ -70,6 +70,7 @@ export default async function RepairsPage({ searchParams }: RepairsPageProps) {
       "id, sar_no, customer_id, requesting_branch_id, sale_line_item_id, manual_serial, assigned_to, status, request_date",
       { count: "exact" },
     )
+    .is("voided_at", null)
     .order("request_date", { ascending: false })
     .order("created_at", { ascending: false })
     .range(from, to);

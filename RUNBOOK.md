@@ -534,3 +534,192 @@ Seed data needed: at least one customer, ideally one with an existing sale recor
 - Repair intake's "From sale" search preloads the newest 500 serialized sold lines (`SOLD_ITEM_CAP`); switch to server-side search if intake regularly needs older sales.
 - `rate_limits` is fixed-window and self-cleaning; no cron needed.
 - If any other report over `sales`/`sale_line_items`/`stock` times out for branch users, apply the `(select auth_role())` InitPlan rewrite from `0017` to that table's policies — `stock`'s policies still use the per-row form.
+
+# Phase 6 (Items 1-2) — Repair-pool filter + repair/earmold status lockdown (2026-07-22)
+
+## 1. Push the schema
+
+```
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: migration `0020_repair_status_rls.sql` applied. It drops the old blanket `repairs_all` / `rse_all` / `earmold_all` policies and recreates select/insert/update policies (`repairs_select/insert/update`, `rse_select/insert/update`, `earmold_select/insert/update`), then recreates `repair_add_event` with an `auth_role() in ('admin','technical')` guard at the top. No migration was needed for `is_repair_pool` visibility — `stock_visible` (migration `0010`) already exposes that column.
+
+## 2. Build
+
+```
+npm run build
+```
+
+Watch for TS errors in `src/components/transfers/line-editor.tsx`, `src/app/(app)/inventory/page.tsx`, `src/app/(app)/transfers/[id]/page.tsx`, `src/app/(app)/repairs/[id]/page.tsx`, `src/app/(app)/earmolds/[id]/page.tsx`.
+
+## 3. Manual checklist
+
+- **Transfer picker defaults to sellable stock**: open a draft transfer from a branch holding both sellable and repair-pool stock. The stock picker shows only sellable items by default ("Sellable" segment highlighted). Switching to "Repair pool" reveals only pool items; "All" shows both.
+- **Repair-pool filter reveals pool items**: added lines and picker rows for pool stock show an amber "Repair pool" badge. A mixed transfer (some sellable, some pool lines) is visually distinguishable at a glance.
+- **Inventory page pool filter**: `/inventory` defaults to sellable stock (`?pool=` absent or `sellable`). Switching the "Stock pool" dropdown to "Repair pool" or "All" updates the list and survives Previous/Next pagination links (check the URL carries `pool=repair` etc.).
+- **Branch rep sees no repair status controls but can create**: log in as a `branch_rep`. `/repairs/new` and `/earmolds/new` are reachable and submit successfully. On `/repairs/[id]` and `/earmolds/[id]` for that branch's own records, no status/event form, no "Edit" (assignment) dialog, no advance-status button appears — only the read-only timeline/badge.
+- **Technical can advance status**: log in as `technical`. Repair and earmold detail pages show the status/event form and (for repairs) the edit/assignment dialog; submitting a status change succeeds and the timeline updates.
+- **Admin can do both**: admin sees creation, status controls, and assignment on both entities.
+- **RPC-level enforcement**: with a branch_rep or top_mgmt session, calling `repair_add_event` directly (e.g. via browser devtools `supabase.rpc(...)`) should fail with `not authorized to update repair status`. A direct `update`/`insert` against `repair_status_events`, `repair_requests`, or `earmold_requests` from a non-admin/technical session should be rejected by RLS.
+
+# Phase 6 (Item 4) — Chat restricted to HQ ↔ branch only (2026-07-22)
+
+## 1. Push the schema
+
+```
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: migration `0021_chat_hq_only.sql` applied. It adds `branches.is_head_office` (default `false`), sets it `true` for the branch with `code = 'HQ'` ("EDI HQ"), and recreates the `chat_insert` policy on `chat_messages` so a branch-pair message now additionally requires that `branch_a_id`/`branch_b_id` includes a head-office branch. Existing branch-to-branch rows (e.g. any historical pair not involving HQ) are left in place for history but can no longer be written to, and the UI no longer offers a path to them.
+
+Verify:
+```sql
+select code, name, is_head_office from branches order by is_head_office desc;
+```
+Exactly one row (`code = 'HQ'`) should have `is_head_office = true`.
+
+## 2. Build
+
+```
+npm run build
+```
+
+Watch for TS errors in `src/lib/chat.ts`, `src/components/chat/chat-widget.tsx`, `src/components/app-shell.tsx`.
+
+## 3. Manual checklist
+
+- **Branch rep sees only General + Head office**: log in as a `branch_rep` whose `branch_id` is a normal (non-HQ) branch. The chat channel dropdown shows exactly two options: "General — whole organization" and "Head office". No other branch names appear.
+- **HQ user can pick any branch**: log in as a user whose `branch_id` is the HQ branch (`code = 'HQ'`), or as a branchless `admin`/`top_mgmt` user. The dropdown shows "General" plus one entry per non-HQ branch ("Chat with <branch>"); selecting one opens that branch's HQ channel and messages land there.
+- **No path to branch-to-branch**: there is no UI control anywhere that lets two non-HQ branches pick each other — the old "Between two branches…" pair picker is gone.
+- **RLS rejects a hand-crafted branch-to-branch insert**: with any authenticated session, `supabase.from('chat_messages').insert({ branch_a_id: <branchX>, branch_b_id: <branchY>, sender_id: ..., body: 'test' })` where neither branch is HQ should fail (RLS policy violation). The same insert with one side set to the HQ branch id (and the sender authorized for that pair) should succeed.
+- **Defensive fallback**: if `is_head_office` is ever `false` for every branch, branch/HQ-picker options disappear and only "General" is shown — confirm this doesn't crash the widget (can be checked by temporarily setting `is_head_office = false` everywhere in a scratch/staging DB, not production).
+
+# Phase 6 (Item 3) — Admin reversals + serial corrections (2026-07-22)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build. This is the largest and most sensitive item in Phase 6 — it touches stock and money — review the checklist carefully before trusting it in front of the client.
+
+## 1. Push the schema
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: migration `0022_admin_corrections.sql` applied. It adds:
+- `admin_corrections` table (admin-only RLS) — every void/reversal/correction writes a before/after jsonb snapshot row here.
+- `sales.voided_at` / `voided_by` / `void_reason`; `repair_requests.voided_at` / `void_reason`; `earmold_requests.voided_at` / `void_reason`; `transfers.reversed_at` / `reversed_by` / `reverse_reason`.
+- Six new `security definer` RPCs, each admin-gated and reason-required: `sale_void`, `intake_void`, `transfer_reverse`, `serial_correct`, `repair_void`, `earmold_void`.
+
+Verify in the dashboard: Database → Tables shows `admin_corrections`; Database → Functions shows all six new functions (language `plpgsql`, security definer); Table Editor → `sales`/`transfers`/`repair_requests`/`earmold_requests` show the new columns.
+
+## 2. Build
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- `src/components/inventory/stock-table.tsx`, `src/components/transfers/line-editor.tsx`, and the four detail pages (`sales/[id]`, `transfers/[id]`, `repairs/[id]`, `earmolds/[id]`) all pass a server action (`voidSale`, `voidIntake`, `reverseTransfer`, `correctSerial`, `voidRepair`, `voidEarmold`) as a prop into the shared `VoidDialog`/`SerialCorrectDialog` client components — standard Next.js Server Action-as-prop pattern, but double-check it compiles given this repo's React/Next versions.
+- No generated `Database` type exists in this repo (same caveat as every prior phase), so every `.rpc(...)` call against the six new functions is loosely typed — a typo'd param name only surfaces at runtime as a Postgres "function not found" error.
+- `src/app/repair-status/actions.ts` now filters `.is("voided_at", null)` on the public SAR lookup query — there is **no** separate SQL `portal_lookup` function in this codebase (the plan referenced one that doesn't exist as written; the actual lookup is this inline query), so the filter was added directly there instead of "recreating" a nonexistent function.
+
+## 3. Manual checklist — sale void
+
+- Record a test sale (serialized or lot line, doesn't matter) as any user, then as **admin** open its detail page. Confirm a **"Void sale"** button appears next to Print (admin-only, hidden once the sale is voided).
+- Click it → dialog requires a reason; Submit stays disabled until you type one. Submit with a reason.
+- Expect: sale detail now shows a red **"VOIDED — <reason> · <admin name> · <date>"** banner; every line's Return button is gone (voided sales can't be further returned); the line(s) show `after_sales_status = Returned`.
+- In the SQL editor: the stock row involved is back to `status = 'available'` (serialized) or its `quantity` increased by the sold amount (lot); a new `stock_movements` row exists with `movement_type = 'return'` and a note starting `void: `.
+- Visit `/admin/corrections` → a new row: entity **Sale**, action **void**, your admin name, the reason, and expandable **Before/After** JSON showing the sale + line snapshots.
+- Confirm the voided sale no longer appears in `/sales` (default list excludes `voided_at is not null`).
+- Try voiding the same sale again (e.g. resubmit) → rejected with "sale already voided".
+
+## 4. Manual checklist — intake void (refuse-if-touched)
+
+- On `/inventory` as admin, find (or create via Stock intake) a fresh, untouched stock row. Confirm each row now has a small pencil icon next to its serial and a **"Void intake"** button (admin-only).
+- Void it → dialog requires a reason. Submit. Expect: the row disappears entirely from `/inventory` (hard-deleted, not soft-deleted) and a corrections-log entry appears with entity **Stock intake**, action **void**, `after_data: null`.
+- Now try voiding a stock row that has been sold, transferred, or partially consumed (quantity ≠ original_quantity) → expect the RPC to reject with **"stock has activity — cannot void"** (surfaced as a toast) and the row to remain untouched.
+
+## 5. Manual checklist — transfer reverse
+
+- Take a transfer through to **Confirmed** status (reuse the Phase 3 checklist flow: draft → reserve → dispatch → receive every line).
+- As admin, open the confirmed transfer's detail page → a **"Reverse transfer"** button appears (only while `status = confirmed` and not already reversed).
+- Click it, provide a reason, submit. Expect: the transfer's status badge **stays "Confirmed"** (history stays truthful, per the plan) but a red **"REVERSED — <reason> · <admin> · <date>"** banner appears above the details card.
+- In the SQL editor: the transferred stock is back at the origin branch, `status = 'available'`; two new `stock_movements` rows exist per line (`transfer_out` then `transfer_in`, note starting `reversal: `, direction destination → origin).
+- Corrections log shows entity **Transfer**, action **void**, with before/after snapshots of the transfer + its lines.
+- Try reversing the same transfer again → rejected with "transfer already reversed". Try reversing a transfer still in draft/reserved/in_transit → rejected with "transfer not confirmed".
+
+## 6. Manual checklist — serial correction
+
+- On a **sale line** (sale detail page): as admin, click the pencil next to a stock line's serial. Dialog requires both a new serial and a reason.
+- Submit a corrected serial. Expect: the line's serial updates immediately on refresh; if that line's `stock_id` matches a stock row, correcting via the **stock** scope (see next bullet) cascades to this same line automatically — the two scopes serve different situations (see file comments in `0022_admin_corrections.sql`).
+- On `/inventory`, correct a stock row's serial via its pencil icon. Then open a sale or transfer that references that same stock — its serial should now also read the corrected value (confirms the `serial_snapshot` cascade on `sale_line_items`/`transfer_line_items`).
+- Try correcting a stock serial to a value that already exists on a different stock row → rejected with "serial already in use".
+- On a repair detail page (a repair created via **manual serial**, not linked to a sale), correct its serial via the pencil next to "Serial". Then try the same on a repair that **is** linked to a sale line → rejected with a message directing you to correct it via the sale line instead.
+- Every correction appears in `/admin/corrections` as entity **Serial**, action **edit**, with `before_data`/`after_data` showing `{"scope": ..., "row": {...}}`.
+
+## 7. Manual checklist — repair / earmold void
+
+- On a repair detail page, admin sees a **"Void repair"** button (hidden once voided). Void with a reason → red VOIDED banner appears, the status/event form and edit dialog disappear, and the repair drops out of `/repairs`' default list.
+- Confirm the public portal (`/repair-status`) no longer returns this repair for its SAR number + phone (generic "No repair found" message, same as an unknown SAR — by design, no enumeration signal).
+- Same flow for an earmold request: **"Void request"** button, VOIDED banner, status button disappears, request drops out of `/earmolds`.
+
+## 8. Manual checklist — non-admin has no access
+
+- Log in as a `branch_rep`, `technical`, or `top_mgmt` user. Confirm **none** of the void buttons, "Reverse transfer" button, or serial-correction pencils appear anywhere (sale/transfer/repair/earmold detail, `/inventory`).
+- Confirm `/admin/corrections` redirects non-admins to `/`.
+- With a non-admin session, call one of the RPCs directly (e.g. via browser devtools `supabase.rpc('sale_void', { p_sale_id: '<any-uuid>', p_reason: 'test' })`) → expect it to fail with **"admin only"**, proving the RPC-level guard holds even if a UI gate were ever bypassed.
+
+## 9. Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo (same situation as every prior phase) — every new `.rpc(...)` call is loosely typed.
+- `admin_corrections.entity_id` isn't a foreign key to any specific table (it can point at `sales`, `stock` — now possibly deleted — `transfers`, `repair_requests`, or `earmold_requests` depending on `entity`), so there's no referential integrity there by design; the before/after jsonb snapshots are the durable record even after a `stock_intake` void hard-deletes the row.
+- `serial_correct` scope `'repair'` only updates `manual_serial` and deliberately refuses when the repair is linked to a sale line (its serial comes from that line instead) — this is a design decision made during implementation since the plan's spec for this scope was underspecified; flag to Josh if repairs commonly need serial correction on the *linked-sale* path too, since today that requires using the sale-line pencil instead.
+- The plan referenced a SQL function called `portal_lookup` in migration `0013` to be "recreated" with a `voided_at is null` filter — no such function exists anywhere in this codebase (the public lookup has always been a plain query in `src/app/repair-status/actions.ts`). The filter was added there directly; nothing was recreated.
+- Reversing a transfer or voiding a sale does not attempt to auto-reconcile any downstream repair/earmold records that might reference the same stock — if a unit was later sent for repair after a sale that then gets voided, that's a manual follow-up, not something the RPC detects.
+
+# Phase 6 (Item 5) — Top Management analytics dashboard (2026-07-22)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build.
+
+## 1. Push the schema
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: migration `0023_analytics_views.sql` applied. It adds two `security_invoker = off` views — `analytics_sales_by_product` (product/category/branch/month grain, with `units`, `revenue`, `cost`) and `analytics_sales_by_service` (service/branch/month grain, `units`/`revenue`, no cost) — each filtering `where ... and auth_role() in ('admin','top_mgmt')` **inside** the view body (the security-critical bit: since the view runs as its owner, not the caller, RLS on the underlying `sales`/`sale_line_items` tables is bypassed, so this in-view role check is the only thing stopping a branch_rep/technical session from reading everything through it). Both exclude voided sales (`s.voided_at is null`, depends on `0022_admin_corrections.sql`) and non-serialized/service line mismatches via `line_type`. Granted to `authenticated`, revoked from `anon`.
+
+Verify in the dashboard: Database → Views shows both; Database → Policies is irrelevant here (views, not RLS-protected tables) — instead confirm via SQL editor as a non-admin test user (or by temporarily checking `auth_role()` output) that `select count(*) from analytics_sales_by_product` returns 0 for a branch_rep/technical session and non-zero for admin/top_mgmt.
+
+## 2. Build
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- `src/app/(app)/analytics/query.ts` is the single source of truth for filter parsing, previous-period math, fetches, and all aggregation (SKU/service/branch rollups, monthly trend pivot) — both `page.tsx` and the three `export/*/route.ts` CSV routes import from it so the on-screen tables and their exports can't drift, same pattern as `reports/sales/query.ts`.
+- No generated `Database` type exists in this repo (same caveat as every prior phase) — every `.from("analytics_sales_by_product"|"analytics_sales_by_service")` call is loosely typed; a typo'd column name only surfaces at runtime.
+- `src/components/analytics/trend-chart.tsx`, `sku-table.tsx`, `service-table.tsx`, and `branch-table.tsx` all import types (`SkuAgg`, `ServiceAgg`, `BranchAgg`, `TrendSeries`) from `@/app/(app)/analytics/query` via `import type` — this is a components-directory file importing from inside a route group (`(app)`), which is unusual for this codebase (existing report components keep their query helper local to the route folder) but is a plain type-only import, erased at compile time, so it doesn't create a runtime dependency or a client/server boundary problem.
+- `recharts` (`^3.9.2`) was **already a dependency** (used by `src/components/reports/sales-chart.tsx`) — no new package was added. The trend chart is a `LineChart` with one `Line` per branch (capped at the top 6 by total revenue + an "Others" series), following the same styling conventions as `SalesChart`.
+- KPI "Branches with sales" and the branch performance table both count/include a branch based on having *any* sale-line activity in the period, not `revenue > 0` — deliberate, so a branch whose only activity is a zero-price legacy line doesn't disappear from the KPI while still appearing in the branch table below it.
+- "Average sale value" is computed from a direct `sales` table count (`voided_at is null`, date + branch filtered) divided by total revenue from the two views — the views themselves have no sale-level grain (they're pre-aggregated by product/service), so this KPI deliberately reads `sales` directly rather than trying to derive a sale count from view rows.
+
+## 3. Manual checklist
+
+- **top_mgmt sees Analytics with cross-branch numbers**: log in as `top_mgmt` (or `admin`). Sidebar shows an "Analytics" link under Reports. Open it — KPI row (revenue, units, margin, branches with sales, average sale value, each with a vs-previous-period delta), a monthly revenue trend chart, and three ranked tables (SKUs, services, branches) all populate with data spanning every branch, not just one.
+- **branch_rep has no link and is redirected**: log in as `branch_rep` or `technical`. No "Analytics" link in the sidebar. Navigating directly to `/analytics` redirects to `/`.
+- **Filters work**: change From/To dates, pick a branch, pick a category, click Apply — the URL carries `?from=&to=&branch=&category=`, and every KPI/table/chart reflects the filtered scope. Click Reset — returns to the last-12-months, all-branches default.
+- **SKU sort toggle**: click "Units" vs "Revenue" column headers on the Best-selling SKUs table — the table re-sorts and the active column is bolded; the URL's `?sort=` updates and survives an Apply on the filter form (hidden `sort` input).
+- **CSV export**: click each of the three "Export CSV" buttons (SKUs, services, branches) — each downloads a CSV matching the current filters (SKU export also respects the current sort). Unlike the on-screen top-20 SKU table, the SKU CSV export includes **all** matching products, not just the top 20 — intentional, flag if a client expects the export capped to match the screen.
+- **Branch rank movement**: with at least two periods of data, confirm the branch table's "vs previous" column shows an up/down arrow with the rank delta, "No change", or "New" (branch had no revenue in the immediately-preceding equal-length period).
+- **Legacy data note**: the dismissible amber note about zero-price legacy lines appears on first visit; clicking its X hides it and it stays hidden on reload (localStorage, same pattern as the welcome tour) for that browser.
+- **Empty-state handling**: pick a filter combination with zero matching sales (e.g. a future date range) — KPIs show ₱0/0 with "n/a" deltas, the trend chart and all three tables show their "No … in the selected period" empty-state row instead of erroring.
+- **RLS holds even off the UI**: with a branch_rep or technical session, `supabase.from('analytics_sales_by_product').select('*')` (or `analytics_sales_by_service`) directly via devtools should return **zero rows** (not an error — the `auth_role()` filter inside the view just excludes everything for that role). This is the load-bearing security check for this whole feature; verify it explicitly rather than trusting the UI redirect alone.
+
+## 4. Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo — same caveat as every prior phase.
+- The previous-period comparison is computed at month granularity (matches the views' `date_trunc('month', ...)` grain): both the current and previous ranges get truncated to whole months before comparison, so a custom `from`/`to` that lands mid-month will compare against whole preceding months, not a day-for-day mirror. This mirrors an existing quirk already present in `reports/sales`'s own `.gte("month", filters.from)` filtering (a custom `from` date after the 1st of its month can under-include that month's row) — not a new bug introduced here, just inherited from the same pattern.
+- Trend chart caps at the top 6 branches by total revenue for the selected period, folding the rest into "Others" — if a client wants every branch broken out regardless of count, that's a follow-up, not a bug.
+- "Average sale value" ignores the category filter (a single sale can mix categories, so category-scoping a whole-sale count doesn't have a clean meaning) — the SKU/service/branch tables and the rest of the KPIs do respect the category filter.

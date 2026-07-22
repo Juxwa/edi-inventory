@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircleIcon, XIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { branchChannel, channelKey, type ChatChannel } from "@/lib/chat";
+import { headOfficeChannel, channelKey, type ChatChannel } from "@/lib/chat";
 import type { Profile } from "@/lib/supabase/profile";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { ChatThread } from "@/components/chat/chat-thread";
 
-type Branch = { id: string; name: string };
+type Branch = { id: string; name: string; is_head_office: boolean };
 
 type ChatWidgetProps = {
   currentUserId: string;
@@ -25,17 +25,16 @@ type ChatWidgetProps = {
 };
 
 const GENERAL = "general";
+const HEAD_OFFICE = "head-office";
 
 export function ChatWidget({ currentUserId, role, branchId }: ChatWidgetProps) {
   const supabase = useMemo(() => createClient(), []);
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
-  // "general" or a peer branch id (branch users), or an explicit pair
-  // (branchless head-office users, who have no home branch to pair with).
+  // "general", "head-office" (branch users' single HQ channel), or a picked
+  // branch id (HQ / branchless head-office users choosing which branch).
   const [selection, setSelection] = useState<string>(GENERAL);
-  const [pairA, setPairA] = useState<string>("");
-  const [pairB, setPairB] = useState<string>("");
   const openRef = useRef(open);
   useEffect(() => {
     openRef.current = open;
@@ -45,7 +44,7 @@ export function ChatWidget({ currentUserId, role, branchId }: ChatWidgetProps) {
     let cancelled = false;
     supabase
       .from("branches")
-      .select("id, name")
+      .select("id, name, is_head_office")
       .order("name")
       .then(({ data }) => {
         if (!cancelled) setBranches((data as Branch[] | null) ?? []);
@@ -64,33 +63,32 @@ export function ChatWidget({ currentUserId, role, branchId }: ChatWidgetProps) {
     [branches],
   );
 
+  const hqBranch = branches.find((branch) => branch.is_head_office) ?? null;
+  const hasHeadOffice = hqBranch !== null;
   const isBranchless = branchId === null;
-  const canPickPairs = isBranchless && (role === "admin" || role === "top_mgmt");
-  const otherBranches = branches.filter((branch) => branch.id !== branchId);
+  const isHqBranchUser = hqBranch !== null && branchId === hqBranch.id;
+  // Branch reps (a real, non-HQ home branch) get exactly one HQ channel.
+  // HQ-based staff and branchless admin/top_mgmt get a picker over every
+  // other branch, each opening that branch's HQ channel.
+  const canPickBranch =
+    hasHeadOffice &&
+    (isHqBranchUser || (isBranchless && (role === "admin" || role === "top_mgmt")));
+  const isBranchRep = hasHeadOffice && !isBranchless && !isHqBranchUser;
+  const pickableBranches = hqBranch
+    ? branches.filter((branch) => branch.id !== hqBranch.id)
+    : [];
 
   let channel: ChatChannel = { kind: "general" };
   let audienceLabel = "Everyone at Ear Diagnostics can see these messages";
-  if (!isBranchless && selection !== GENERAL) {
-    channel = branchChannel(branchId, selection);
-    audienceLabel = `Between ${nameById.get(branchId) ?? "your branch"} and ${
+  if (isBranchRep && selection === HEAD_OFFICE && hqBranch) {
+    channel = headOfficeChannel(branchId as string, hqBranch.id);
+    audienceLabel = `Between ${nameById.get(branchId as string) ?? "your branch"} and head office`;
+  } else if (canPickBranch && selection !== GENERAL && hqBranch) {
+    channel = headOfficeChannel(selection, hqBranch.id);
+    audienceLabel = `Between head office and ${
       nameById.get(selection) ?? "the selected branch"
-    } — plus head office`;
-  } else if (
-    canPickPairs &&
-    selection !== GENERAL &&
-    pairA &&
-    pairB &&
-    pairA !== pairB
-  ) {
-    channel = branchChannel(pairA, pairB);
-    audienceLabel = `Between ${nameById.get(pairA) ?? "?"} and ${
-      nameById.get(pairB) ?? "?"
-    } — plus head office`;
+    }`;
   }
-
-  const pairReady =
-    selection === GENERAL ||
-    (!isBranchless ? true : Boolean(pairA && pairB && pairA !== pairB));
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 print:hidden">
@@ -121,73 +119,30 @@ export function ChatWidget({ currentUserId, role, branchId }: ChatWidgetProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={GENERAL}>General — whole organization</SelectItem>
-              {!isBranchless
-                ? otherBranches.map((branch) => (
+              {isBranchRep ? (
+                <SelectItem value={HEAD_OFFICE}>Head office</SelectItem>
+              ) : null}
+              {canPickBranch
+                ? pickableBranches.map((branch) => (
                     <SelectItem key={branch.id} value={branch.id}>
                       Chat with {branch.name}
                     </SelectItem>
                   ))
-                : canPickPairs
-                  ? [
-                      <SelectItem key="pair" value="pair">
-                        Between two branches…
-                      </SelectItem>,
-                    ]
-                  : null}
+                : null}
             </SelectContent>
           </Select>
-
-          {canPickPairs && selection !== GENERAL ? (
-            <div className="flex items-center gap-2">
-              <Select value={pairA} onValueChange={setPairA}>
-                <SelectTrigger className="h-8" aria-label="First branch">
-                  <SelectValue placeholder="Branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((branch) => (
-                    <SelectItem key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <span className="text-xs text-muted-foreground">and</span>
-              <Select value={pairB} onValueChange={setPairB}>
-                <SelectTrigger className="h-8" aria-label="Second branch">
-                  <SelectValue placeholder="Branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches
-                    .filter((branch) => branch.id !== pairA)
-                    .map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
 
           <p className="text-xs text-muted-foreground">{audienceLabel}</p>
         </div>
 
-        {pairReady ? (
-          <ChatThread
-            key={channelKey(channel)}
-            channel={channel}
-            currentUserId={currentUserId}
-            onIncoming={handleIncoming}
-            emptyLabel="No messages here yet. Say hello!"
-            className="flex-1"
-          />
-        ) : (
-          <div className="flex flex-1 items-center justify-center p-4">
-            <p className="text-sm text-muted-foreground">
-              Pick two branches to open their channel.
-            </p>
-          </div>
-        )}
+        <ChatThread
+          key={channelKey(channel)}
+          channel={channel}
+          currentUserId={currentUserId}
+          onIncoming={handleIncoming}
+          emptyLabel="No messages here yet. Say hello!"
+          className="flex-1"
+        />
       </div>
 
       <Button

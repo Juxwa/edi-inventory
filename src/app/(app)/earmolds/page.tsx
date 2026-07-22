@@ -69,6 +69,7 @@ export default async function EarmoldsPage({ searchParams }: EarmoldsPageProps) 
       "id, patient_name, hearing_aid_model, side, requesting_branch_id, status, created_at",
       { count: "exact" },
     )
+    .is("voided_at", null)
     .order("created_at", { ascending: false })
     .range(from, to);
 

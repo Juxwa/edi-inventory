@@ -6,6 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ReturnDialog } from "@/components/sales/return-dialog";
 import { PrintButton } from "@/components/print-button";
+import { VoidedBanner } from "@/components/admin/voided-banner";
+import { VoidDialog } from "@/components/admin/void-dialog";
+import { SerialCorrectDialog } from "@/components/admin/serial-correct-dialog";
+import { voidSale } from "@/app/(app)/admin/corrections/actions";
 import {
   Table,
   TableBody,
@@ -34,6 +38,9 @@ type SaleDetailRow = {
   discount: number | null;
   vat_amount: number | null;
   is_paid: boolean;
+  voided_at: string | null;
+  voided_by: string | null;
+  void_reason: string | null;
 };
 
 type LineRow = {
@@ -98,7 +105,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const { data: sale, error: saleError } = await supabase
     .from("sales")
     .select(
-      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, vat_amount, is_paid",
+      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, vat_amount, is_paid, voided_at, voided_by, void_reason",
     )
     .eq("id", id)
     .single();
@@ -109,7 +116,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
 
   const saleRow = sale as SaleDetailRow;
 
-  const [branchResult, customerResult, lineResult] = await Promise.all([
+  const [branchResult, customerResult, lineResult, voidedByResult] = await Promise.all([
     supabase.from("branches").select("id, name").eq("id", saleRow.branch_id).single(),
     saleRow.customer_id
       ? supabase.from("customers").select("id, name").eq("id", saleRow.customer_id).single()
@@ -120,10 +127,14 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
         "id, line_type, stock_id, product_id, service_id, quantity, unit_price, serial_snapshot, warranty_expiry, after_sales_status, returned_quantity",
       )
       .eq("sale_id", saleRow.id),
+    saleRow.voided_by
+      ? supabase.from("profiles").select("name").eq("id", saleRow.voided_by).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const branchName: string = (branchResult.data as { name: string } | null)?.name ?? "—";
   const customer = customerResult.data as { id: string; name: string } | null;
+  const voidedByName = (voidedByResult.data as { name: string } | null)?.name ?? null;
 
   const lines: LineRow[] = (lineResult.data as LineRow[] | null) ?? [];
 
@@ -165,7 +176,10 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const discount = saleRow.discount ?? 0;
   const net = Math.max(0, gross - discount);
 
-  const canReturn = profile.role === "admin" || profile.branch_id === saleRow.branch_id;
+  const isVoided = saleRow.voided_at !== null;
+  const canReturn =
+    !isVoided && (profile.role === "admin" || profile.branch_id === saleRow.branch_id);
+  const isAdmin = profile.role === "admin";
 
   return (
     <div className="flex flex-col gap-6">
@@ -182,10 +196,25 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
             Recorded {formatDate(saleRow.sale_date)} at {branchName}
           </p>
         </div>
-        <span className="print:hidden">
+        <span className="flex items-center gap-2 print:hidden">
+          {isAdmin && !isVoided ? (
+            <VoidDialog
+              action={voidSale}
+              hiddenFields={{ sale_id: saleRow.id }}
+              triggerLabel="Void sale"
+              title="Void this sale"
+              description="Stock will be restored and the sale marked voided. This cannot be undone."
+              confirmLabel="Void sale"
+              pendingLabel="Voiding..."
+            />
+          ) : null}
           <PrintButton />
         </span>
       </div>
+
+      {isVoided ? (
+        <VoidedBanner reason={saleRow.void_reason} actorName={voidedByName} when={saleRow.voided_at} />
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -286,7 +315,17 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
                           </span>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {line.serial_snapshot ?? "—"}
+                          <div className="flex items-center gap-1">
+                            {line.serial_snapshot ?? "—"}
+                            {isAdmin && line.line_type === "stock" ? (
+                              <SerialCorrectDialog
+                                scope="sale_line"
+                                id={line.id}
+                                currentSerial={line.serial_snapshot}
+                                returnPath={`/sales/${saleRow.id}`}
+                              />
+                            ) : null}
+                          </div>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {line.quantity}

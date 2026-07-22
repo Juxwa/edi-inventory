@@ -18,20 +18,28 @@ import {
   TransferLinesTable,
   StockPicker,
   type TransferLineRowData,
+  type StockPoolFilter,
 } from "@/components/transfers/line-editor";
 import { ReceivePanel, type ReceiveLineRowData } from "@/components/transfers/receive-panel";
 import { ChatThread } from "@/components/chat/chat-thread";
 import { DispatchDialog } from "@/components/transfers/dispatch-dialog";
 import { ReserveButton, DeleteDraftButton } from "@/components/transfers/lifecycle-buttons";
 import { PrintButton } from "@/components/print-button";
+import { VoidedBanner } from "@/components/admin/voided-banner";
+import { VoidDialog } from "@/components/admin/void-dialog";
+import { reverseTransfer } from "@/app/(app)/admin/corrections/actions";
 import type { TransferStatus } from "@/lib/validators/transfer";
 
 export const dynamic = "force-dynamic";
 
 type TransferDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ stockq?: string }>;
+  searchParams: Promise<{ stockq?: string; pool?: string }>;
 };
+
+function parsePoolFilter(value: string | undefined): StockPoolFilter {
+  return value === "repair" || value === "all" ? value : "sellable";
+}
 
 type TransferDetailRow = {
   id: string;
@@ -46,6 +54,9 @@ type TransferDetailRow = {
   sis_no: string | null;
   created_at: string;
   request_id: string | null;
+  reversed_at: string | null;
+  reversed_by: string | null;
+  reverse_reason: string | null;
 };
 
 function firstOrNull<T>(value: T | T[] | null): T | null {
@@ -72,15 +83,16 @@ export default async function TransferDetailPage({
   }
 
   const { id } = await params;
-  const { stockq } = await searchParams;
+  const { stockq, pool } = await searchParams;
   const query = stockq?.trim() ?? "";
+  const poolFilter = parsePoolFilter(pool);
 
   const supabase = await createClient();
 
   const { data: transfer, error: transferError } = await supabase
     .from("transfers")
     .select(
-      "id, code, status, from_branch_id, to_branch_id, transfer_date, received_date, courier, tracking_code, sis_no, created_at, request_id",
+      "id, code, status, from_branch_id, to_branch_id, transfer_date, received_date, courier, tracking_code, sis_no, created_at, request_id, reversed_at, reversed_by, reverse_reason",
     )
     .eq("id", id)
     .single();
@@ -91,10 +103,13 @@ export default async function TransferDetailPage({
 
   const transferRow = transfer as TransferDetailRow;
 
-  const branchesResult = await supabase
-    .from("branches")
-    .select("id, name")
-    .order("name");
+  const [branchesResult, reversedByResult] = await Promise.all([
+    supabase.from("branches").select("id, name").order("name"),
+    transferRow.reversed_by
+      ? supabase.from("profiles").select("name").eq("id", transferRow.reversed_by).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const reversedByName = (reversedByResult.data as { name: string } | null)?.name ?? null;
 
   const branches: { id: string; name: string }[] = branchesResult.data ?? [];
   const branchNameById = new Map<string, string>(
@@ -124,13 +139,15 @@ export default async function TransferDetailPage({
     .filter((stockId: string | null): stockId is string => stockId !== null);
 
   let productNameByStockId = new Map<string, string>();
+  let poolByStockId = new Map<string, boolean>();
   if (stockIds.length > 0) {
     const { data: stockRows } = await supabase
       .from("stock_visible")
-      .select("id, product_id, products(name)")
+      .select("id, product_id, is_repair_pool, products(name)")
       .in("id", stockIds);
     type StockJoinRow = {
       id: string;
+      is_repair_pool: boolean;
       products: { name: string } | { name: string }[] | null;
     };
     const rows: StockJoinRow[] = (stockRows as StockJoinRow[] | null) ?? [];
@@ -139,6 +156,9 @@ export default async function TransferDetailPage({
         row.id,
         firstOrNull(row.products)?.name ?? "—",
       ]),
+    );
+    poolByStockId = new Map(
+      rows.map((row: StockJoinRow) => [row.id, row.is_repair_pool]),
     );
   }
 
@@ -151,6 +171,9 @@ export default async function TransferDetailPage({
     quantity: line.quantity,
     received_confirmed: line.received_confirmed,
     received_note: line.received_note,
+    is_repair_pool: line.stock_id
+      ? (poolByStockId.get(line.stock_id) ?? false)
+      : false,
   }));
 
   const isAdmin = profile.role === "admin";
@@ -194,9 +217,29 @@ export default async function TransferDetailPage({
           {transferRow.status === "reserved" && canManageDraft ? (
             <DispatchDialog transferId={transferRow.id} />
           ) : null}
+          {isAdmin && transferRow.status === "confirmed" && !transferRow.reversed_at ? (
+            <VoidDialog
+              action={reverseTransfer}
+              hiddenFields={{ transfer_id: transferRow.id }}
+              triggerLabel="Reverse transfer"
+              title="Reverse this transfer"
+              description="Stock moves back to the origin branch with compensating movements. The transfer stays marked confirmed; the reversal is recorded."
+              confirmLabel="Reverse transfer"
+              pendingLabel="Reversing..."
+            />
+          ) : null}
           <PrintButton />
         </div>
       </div>
+
+      {transferRow.reversed_at ? (
+        <VoidedBanner
+          label="REVERSED"
+          reason={transferRow.reverse_reason}
+          actorName={reversedByName}
+          when={transferRow.reversed_at}
+        />
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -243,12 +286,17 @@ export default async function TransferDetailPage({
                 transferId={transferRow.id}
                 fromBranchId={transferRow.from_branch_id}
                 query={query}
+                pool={poolFilter}
               />
             </>
           ) : transferRow.status === "in_transit" && canReceive ? (
             <ReceivePanel transferId={transferRow.id} lines={receiveLines} />
           ) : (
-            <TransferLinesTable lines={lines} />
+            <TransferLinesTable
+              lines={lines}
+              canCorrectSerial={isAdmin}
+              returnPath={`/transfers/${transferRow.id}`}
+            />
           )}
         </CardContent>
       </Card>

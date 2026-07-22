@@ -3,6 +3,7 @@ import {
   branchChannel,
   channelColumns,
   channelKey,
+  headOfficeChannel,
   messageMatchesChannel,
   type ChatMessageRow,
 } from '../src/lib/chat';
@@ -35,6 +36,13 @@ describe('branchChannel', () => {
       branchAId: ILOILO,
       branchBId: HQ,
     });
+  });
+});
+
+describe('headOfficeChannel', () => {
+  it('delegates to branchChannel (canonical sorted pair)', () => {
+    expect(headOfficeChannel(ILOILO, HQ)).toEqual(branchChannel(ILOILO, HQ));
+    expect(headOfficeChannel(ILOILO, HQ)).toEqual(branchChannel(HQ, ILOILO));
   });
 });
 

@@ -58,6 +58,7 @@ export async function lookupRepair(
       "id, sar_no, contact_no, customer_id, request_date, status, downpayment, returned_to_customer_at",
     )
     .eq("sar_no", sar)
+    .is("voided_at", null)
     .maybeSingle();
 
   if (!repair) {

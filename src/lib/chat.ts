@@ -30,6 +30,16 @@ export function branchChannel(
   return { kind: "branches", branchAId, branchBId };
 }
 
+// Chat is HQ <-> branch only (Phase 6 item 4). This is the canonical way to
+// open a branch's channel with head office — it's just branchChannel() with
+// a clearer name at call sites, since one side must always be HQ.
+export function headOfficeChannel(
+  branchId: string,
+  hqBranchId: string,
+): ChatChannel {
+  return branchChannel(branchId, hqBranchId);
+}
+
 export function messageMatchesChannel(
   message: ChatMessageRow,
   channel: ChatChannel,

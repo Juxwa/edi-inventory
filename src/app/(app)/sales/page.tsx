@@ -97,6 +97,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
     .select("id, sale_date, or_no, customer_id, branch_id, discount, is_paid", {
       count: "exact",
     })
+    .is("voided_at", null)
     .order("sale_date", { ascending: false })
     .range(from, to);
 

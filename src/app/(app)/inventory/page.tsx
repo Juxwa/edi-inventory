@@ -39,9 +39,16 @@ type InventoryPageProps = {
     branch?: string;
     category?: string;
     status?: string;
+    pool?: string;
     page?: string;
   }>;
 };
+
+type StockPoolFilter = "sellable" | "repair" | "all";
+
+function parsePoolFilter(value: string | undefined): StockPoolFilter {
+  return value === "repair" || value === "all" ? value : "sellable";
+}
 
 type StockQueryRow = {
   id: string;
@@ -67,6 +74,7 @@ export default async function InventoryPage({
   const branchParam = params.branch?.trim() ?? "";
   const categoryParam = params.category?.trim() ?? "";
   const statusParam = params.status?.trim() ?? "";
+  const poolParam = parsePoolFilter(params.pool?.trim());
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -141,6 +149,11 @@ export default async function InventoryPage({
   if (statusParam) {
     query = query.eq("status", statusParam);
   }
+  if (poolParam === "sellable") {
+    query = query.eq("is_repair_pool", false);
+  } else if (poolParam === "repair") {
+    query = query.eq("is_repair_pool", true);
+  }
 
   const { data, count } = await query;
   const rows: StockQueryRow[] = (data as StockQueryRow[] | null) ?? [];
@@ -165,11 +178,13 @@ export default async function InventoryPage({
     if (branchParam) next.set("branch", branchParam);
     if (categoryParam) next.set("category", categoryParam);
     if (statusParam) next.set("status", statusParam);
+    if (poolParam !== "sellable") next.set("pool", poolParam);
     next.set("page", String(targetPage));
     return `/inventory?${next.toString()}`;
   }
 
-  const hasFilters = q || branchParam || categoryParam || statusParam;
+  const hasFilters =
+    q || branchParam || categoryParam || statusParam || poolParam !== "sellable";
 
   return (
     <div className="flex flex-col gap-6">
@@ -251,6 +266,21 @@ export default async function InventoryPage({
             </SelectContent>
           </Select>
         </div>
+        <div className="grid gap-1.5">
+          <label htmlFor="pool" className="text-sm font-medium">
+            Stock pool
+          </label>
+          <Select name="pool" defaultValue={poolParam}>
+            <SelectTrigger id="pool" className="w-40">
+              <SelectValue placeholder="Sellable" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sellable">Sellable</SelectItem>
+              <SelectItem value="repair">Repair pool</SelectItem>
+              <SelectItem value="all">All</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <Button type="submit" variant="secondary">
           Apply
         </Button>
@@ -261,7 +291,11 @@ export default async function InventoryPage({
         )}
       </form>
 
-      <StockTable rows={stock} showCost={canFilterByBranch} />
+      <StockTable
+        rows={stock}
+        showCost={canFilterByBranch}
+        showAdminActions={profile?.role === "admin"}
+      />
 
       {total > 0 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">

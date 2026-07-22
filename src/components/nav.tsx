@@ -115,6 +115,11 @@ const NAV: NavSection[] = [
         label: "Stock movements",
         roles: ["admin", "branch_rep", "top_mgmt"],
       },
+      {
+        href: "/analytics",
+        label: "Analytics",
+        roles: ["admin", "top_mgmt"],
+      },
     ],
   },
   {
@@ -123,6 +128,11 @@ const NAV: NavSection[] = [
       {
         href: "/admin/users",
         label: "Users",
+        roles: ["admin"],
+      },
+      {
+        href: "/admin/corrections",
+        label: "Corrections log",
         roles: ["admin"],
       },
     ],

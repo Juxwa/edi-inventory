@@ -13,6 +13,10 @@ import { EventTimeline, type RepairEventData } from "@/components/repairs/event-
 import { EventForm } from "@/components/repairs/event-form";
 import { EditRepairDialog } from "@/components/repairs/edit-repair-dialog";
 import { CopyLinkButton } from "@/components/repairs/copy-link-button";
+import { VoidedBanner } from "@/components/admin/voided-banner";
+import { VoidDialog } from "@/components/admin/void-dialog";
+import { SerialCorrectDialog } from "@/components/admin/serial-correct-dialog";
+import { voidRepair } from "@/app/(app)/admin/corrections/actions";
 import { formatCurrency, formatDate } from "@/lib/format";
 import type { RepairStatus, RepairEventStatus } from "@/lib/validators/repair";
 
@@ -38,6 +42,8 @@ type RepairRow = {
   status: RepairStatus;
   returned_to_customer_at: string | null;
   remarks: string | null;
+  voided_at: string | null;
+  void_reason: string | null;
 };
 
 export default async function RepairDetailPage({ params }: RepairDetailPageProps) {
@@ -52,7 +58,7 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
   const { data } = await supabase
     .from("repair_requests")
     .select(
-      "id, sar_no, customer_id, contact_no, requesting_branch_id, requested_by, request_date, sale_line_item_id, manual_serial, issue_description, assigned_to, downpayment, status, returned_to_customer_at, remarks",
+      "id, sar_no, customer_id, contact_no, requesting_branch_id, requested_by, request_date, sale_line_item_id, manual_serial, issue_description, assigned_to, downpayment, status, returned_to_customer_at, remarks, voided_at, void_reason",
     )
     .eq("id", id)
     .maybeSingle();
@@ -68,6 +74,7 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
     lineResult,
     eventsResult,
     techniciansResult,
+    voidCorrectionResult,
   ] = await Promise.all([
     repair.customer_id
       ? supabase
@@ -101,6 +108,17 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
       .eq("role", "technical")
       .eq("is_active", true)
       .order("name"),
+    repair.voided_at
+      ? supabase
+          .from("admin_corrections")
+          .select("actor_id")
+          .eq("entity", "repair")
+          .eq("entity_id", repair.id)
+          .eq("action", "void")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const customer = customerResult.data as {
@@ -139,12 +157,16 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
     productName = (product as { name: string } | null)?.name ?? null;
   }
 
+  const voidActorId =
+    (voidCorrectionResult.data as { actor_id: string | null } | null)?.actor_id ?? null;
+
   const actorIds = Array.from(
     new Set(
       [
         ...eventRows.map((event: EventRow) => event.actor_id),
         repair.assigned_to,
         repair.requested_by,
+        voidActorId,
       ].filter((value: string | null): value is string => value !== null),
     ),
   );
@@ -175,7 +197,10 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
   }));
 
   const serial = repair.manual_serial ?? line?.serial_snapshot ?? "—";
-  const canManage = profile.role !== "top_mgmt";
+  const isVoided = repair.voided_at !== null;
+  const canManage = !isVoided && (profile.role === "admin" || profile.role === "technical");
+  const isAdmin = profile.role === "admin";
+  const voidedByName = voidActorId ? (profileNameById.get(voidActorId) ?? null) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -204,8 +229,23 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
               technicians={technicians}
             />
           ) : null}
+          {isAdmin && !isVoided ? (
+            <VoidDialog
+              action={voidRepair}
+              hiddenFields={{ repair_id: repair.id }}
+              triggerLabel="Void repair"
+              title="Void this repair request"
+              description="This soft-deletes the repair — it drops out of lists and the public portal lookup."
+              confirmLabel="Void repair"
+              pendingLabel="Voiding..."
+            />
+          ) : null}
         </div>
       </div>
+
+      {isVoided ? (
+        <VoidedBanner reason={repair.void_reason} actorName={voidedByName} when={repair.voided_at} />
+      ) : null}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
@@ -230,7 +270,19 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
               <dt className="text-muted-foreground">Contact no.</dt>
               <dd>{repair.contact_no ?? customer?.mobile_no ?? "—"}</dd>
               <dt className="text-muted-foreground">Serial</dt>
-              <dd>{serial}</dd>
+              <dd>
+                <div className="flex items-center gap-1">
+                  {serial}
+                  {isAdmin && !isVoided ? (
+                    <SerialCorrectDialog
+                      scope="repair"
+                      id={repair.id}
+                      currentSerial={repair.manual_serial}
+                      returnPath={`/repairs/${repair.id}`}
+                    />
+                  ) : null}
+                </div>
+              </dd>
               <dt className="text-muted-foreground">Product</dt>
               <dd>{productName ?? "—"}</dd>
               {line ? (

@@ -10,7 +10,9 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { AddLineButton, RemoveLineButton } from "@/components/transfers/line-actions";
+import { SerialCorrectDialog } from "@/components/admin/serial-correct-dialog";
 
 export type TransferLineRowData = {
   id: string;
@@ -19,13 +21,23 @@ export type TransferLineRowData = {
   quantity: number;
   received_confirmed: boolean;
   received_note: string | null;
+  is_repair_pool: boolean;
 };
+
+export type StockPoolFilter = "sellable" | "repair" | "all";
+
+const POOL_OPTIONS: { value: StockPoolFilter; label: string }[] = [
+  { value: "sellable", label: "Sellable" },
+  { value: "repair", label: "Repair pool" },
+  { value: "all", label: "All" },
+];
 
 type StockSearchRow = {
   id: string;
   serial_number: string | null;
   quantity: number;
   product_name: string;
+  is_repair_pool: boolean;
 };
 
 const STOCK_SEARCH_LIMIT = 50;
@@ -33,6 +45,7 @@ const STOCK_SEARCH_LIMIT = 50;
 async function searchAvailableStock(
   fromBranchId: string,
   query: string,
+  pool: StockPoolFilter,
 ): Promise<StockSearchRow[]> {
   const supabase = await createClient();
 
@@ -47,11 +60,17 @@ async function searchAvailableStock(
 
   let stockQuery = supabase
     .from("stock_visible")
-    .select("id, serial_number, quantity, product_id, products(name)")
+    .select("id, serial_number, quantity, product_id, is_repair_pool, products(name)")
     .eq("branch_id", fromBranchId)
     .eq("status", "available")
     .gt("quantity", 0)
     .limit(STOCK_SEARCH_LIMIT);
+
+  if (pool === "sellable") {
+    stockQuery = stockQuery.eq("is_repair_pool", false);
+  } else if (pool === "repair") {
+    stockQuery = stockQuery.eq("is_repair_pool", true);
+  }
 
   if (query) {
     const productIdList = productIds ?? [];
@@ -69,6 +88,7 @@ async function searchAvailableStock(
     id: string;
     serial_number: string | null;
     quantity: number;
+    is_repair_pool: boolean;
     products: { name: string } | { name: string }[] | null;
   };
   const rows: Row[] = (data as Row[] | null) ?? [];
@@ -82,11 +102,24 @@ async function searchAvailableStock(
     id: row.id,
     serial_number: row.serial_number,
     quantity: row.quantity,
+    is_repair_pool: row.is_repair_pool,
     product_name: firstOrNull(row.products)?.name ?? "—",
   }));
 }
 
-export function TransferLinesTable({ lines }: { lines: TransferLineRowData[] }) {
+function RepairPoolBadge() {
+  return <Badge variant="warning">Repair pool</Badge>;
+}
+
+export function TransferLinesTable({
+  lines,
+  canCorrectSerial = false,
+  returnPath,
+}: {
+  lines: TransferLineRowData[];
+  canCorrectSerial?: boolean;
+  returnPath?: string;
+}) {
   if (lines.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border py-10 text-center">
@@ -114,9 +147,24 @@ export function TransferLinesTable({ lines }: { lines: TransferLineRowData[] }) 
         <TableBody>
           {lines.map((line: TransferLineRowData) => (
             <TableRow key={line.id}>
-              <TableCell className="font-medium">{line.product_name}</TableCell>
+              <TableCell className="font-medium">
+                <div className="flex items-center gap-2">
+                  {line.product_name}
+                  {line.is_repair_pool ? <RepairPoolBadge /> : null}
+                </div>
+              </TableCell>
               <TableCell className="text-muted-foreground">
-                {line.serial_snapshot ?? "—"}
+                <div className="flex items-center gap-1">
+                  {line.serial_snapshot ?? "—"}
+                  {canCorrectSerial ? (
+                    <SerialCorrectDialog
+                      scope="transfer_line"
+                      id={line.id}
+                      currentSerial={line.serial_snapshot}
+                      returnPath={returnPath}
+                    />
+                  ) : null}
+                </div>
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {line.quantity}
@@ -165,7 +213,12 @@ export function DraftLinesEditor({
           ) : (
             lines.map((line: TransferLineRowData) => (
               <TableRow key={line.id}>
-                <TableCell className="font-medium">{line.product_name}</TableCell>
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2">
+                    {line.product_name}
+                    {line.is_repair_pool ? <RepairPoolBadge /> : null}
+                  </div>
+                </TableCell>
                 <TableCell className="text-muted-foreground">
                   {line.serial_snapshot ?? "—"}
                 </TableCell>
@@ -184,20 +237,48 @@ export function DraftLinesEditor({
   );
 }
 
+function buildStockHref(transferId: string, query: string, pool: StockPoolFilter): string {
+  const params = new URLSearchParams();
+  if (query) params.set("stockq", query);
+  if (pool !== "sellable") params.set("pool", pool);
+  const qs = params.toString();
+  return `/transfers/${transferId}${qs ? `?${qs}` : ""}`;
+}
+
 export async function StockPicker({
   transferId,
   fromBranchId,
   query,
+  pool,
 }: {
   transferId: string;
   fromBranchId: string;
   query: string;
+  pool: StockPoolFilter;
 }) {
-  const results = await searchAvailableStock(fromBranchId, query);
+  const results = await searchAvailableStock(fromBranchId, query, pool);
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {POOL_OPTIONS.map((option: { value: StockPoolFilter; label: string }) => (
+          <Button
+            key={option.value}
+            asChild
+            size="sm"
+            variant={pool === option.value ? "default" : "outline"}
+          >
+            <Link href={buildStockHref(transferId, query, option.value)}>
+              {option.label}
+            </Link>
+          </Button>
+        ))}
+      </div>
+
       <form method="get" className="flex items-end gap-2">
+        {pool !== "sellable" ? (
+          <input type="hidden" name="pool" value={pool} />
+        ) : null}
         <div className="grid gap-1.5">
           <label htmlFor="stockq" className="text-sm font-medium">
             Search available stock
@@ -215,7 +296,7 @@ export async function StockPicker({
         </Button>
         {query ? (
           <Button asChild variant="ghost">
-            <Link href={`/transfers/${transferId}`}>Clear</Link>
+            <Link href={buildStockHref(transferId, "", pool)}>Clear</Link>
           </Button>
         ) : null}
       </form>
@@ -240,7 +321,12 @@ export async function StockPicker({
             ) : (
               results.map((row: StockSearchRow) => (
                 <TableRow key={row.id}>
-                  <TableCell className="font-medium">{row.product_name}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2">
+                      {row.product_name}
+                      {row.is_repair_pool ? <RepairPoolBadge /> : null}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {row.serial_number ?? "—"}
                   </TableCell>

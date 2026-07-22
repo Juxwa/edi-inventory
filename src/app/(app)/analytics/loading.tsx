@@ -1,0 +1,29 @@
+export default function AnalyticsLoading() {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid gap-2">
+        <div className="h-5 w-32 animate-pulse rounded bg-muted" />
+        <div className="h-4 w-64 animate-pulse rounded bg-muted" />
+      </div>
+      <div className="flex gap-3">
+        <div className="h-9 w-40 animate-pulse rounded-md bg-muted" />
+        <div className="h-9 w-40 animate-pulse rounded-md bg-muted" />
+        <div className="h-9 w-44 animate-pulse rounded-md bg-muted" />
+        <div className="h-9 w-44 animate-pulse rounded-md bg-muted" />
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, index: number) => (
+          <div key={index} className="h-24 animate-pulse rounded-lg border border-border bg-muted/40" />
+        ))}
+      </div>
+      <div className="h-80 animate-pulse rounded-lg border border-border bg-muted/40" />
+      <div className="rounded-lg border border-border">
+        <div className="flex flex-col divide-y divide-border">
+          {Array.from({ length: 6 }).map((_, index: number) => (
+            <div key={index} className="h-11 animate-pulse bg-muted/40" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

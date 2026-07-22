@@ -9,6 +9,9 @@ import {
 } from "@/components/ui/card";
 import { EarmoldStatusBadge } from "@/components/earmolds/earmolds-table";
 import { EarmoldStatusButton } from "@/components/earmolds/status-buttons";
+import { VoidedBanner } from "@/components/admin/voided-banner";
+import { VoidDialog } from "@/components/admin/void-dialog";
+import { voidEarmold } from "@/app/(app)/admin/corrections/actions";
 import { formatDate } from "@/lib/format";
 import type { EarmoldStatus } from "@/lib/validators/earmold";
 
@@ -32,6 +35,8 @@ type EarmoldRow = {
   status: EarmoldStatus;
   created_at: string;
   updated_at: string;
+  voided_at: string | null;
+  void_reason: string | null;
 };
 
 export default async function EarmoldDetailPage({
@@ -48,7 +53,7 @@ export default async function EarmoldDetailPage({
   const { data } = await supabase
     .from("earmold_requests")
     .select(
-      "id, patient_name, contact_no, address, hearing_aid_model, side, serial_no, remarks, requesting_branch_id, requested_by, status, created_at, updated_at",
+      "id, patient_name, contact_no, address, hearing_aid_model, side, serial_no, remarks, requesting_branch_id, requested_by, status, created_at, updated_at, voided_at, void_reason",
     )
     .eq("id", id)
     .maybeSingle();
@@ -58,7 +63,7 @@ export default async function EarmoldDetailPage({
     notFound();
   }
 
-  const [branchResult, requesterResult] = await Promise.all([
+  const [branchResult, requesterResult, voidCorrectionResult] = await Promise.all([
     earmold.requesting_branch_id
       ? supabase
           .from("branches")
@@ -73,11 +78,35 @@ export default async function EarmoldDetailPage({
           .eq("id", earmold.requested_by)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    earmold.voided_at
+      ? supabase
+          .from("admin_corrections")
+          .select("actor_id")
+          .eq("entity", "earmold")
+          .eq("entity_id", earmold.id)
+          .eq("action", "void")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const branchName = (branchResult.data as { name: string } | null)?.name;
   const requesterName = (requesterResult.data as { name: string } | null)?.name;
-  const canManage = profile.role !== "top_mgmt";
+  const isVoided = earmold.voided_at !== null;
+  const canManage = !isVoided && (profile.role === "admin" || profile.role === "technical");
+  const isAdmin = profile.role === "admin";
+  const voidActorId =
+    (voidCorrectionResult.data as { actor_id: string | null } | null)?.actor_id ?? null;
+  let voidedByName: string | null = null;
+  if (voidActorId) {
+    const { data: voidActor } = await supabase
+      .from("profiles")
+      .select("name")
+      .eq("id", voidActorId)
+      .maybeSingle();
+    voidedByName = (voidActor as { name: string } | null)?.name ?? null;
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -92,10 +121,27 @@ export default async function EarmoldDetailPage({
             {branchName ? ` · ${branchName}` : ""}
           </p>
         </div>
-        {canManage ? (
-          <EarmoldStatusButton earmoldId={earmold.id} status={earmold.status} />
-        ) : null}
+        <div className="flex gap-2">
+          {canManage ? (
+            <EarmoldStatusButton earmoldId={earmold.id} status={earmold.status} />
+          ) : null}
+          {isAdmin && !isVoided ? (
+            <VoidDialog
+              action={voidEarmold}
+              hiddenFields={{ earmold_id: earmold.id }}
+              triggerLabel="Void request"
+              title="Void this earmold request"
+              description="This soft-deletes the request — it drops out of lists."
+              confirmLabel="Void request"
+              pendingLabel="Voiding..."
+            />
+          ) : null}
+        </div>
       </div>
+
+      {isVoided ? (
+        <VoidedBanner reason={earmold.void_reason} actorName={voidedByName} when={earmold.voided_at} />
+      ) : null}
 
       <Card className="max-w-2xl">
         <CardHeader>
