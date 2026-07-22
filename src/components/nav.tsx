@@ -18,6 +18,16 @@ type NavSection = {
 
 const NAV: NavSection[] = [
   {
+    section: "Home",
+    items: [
+      {
+        href: "/",
+        label: "Dashboard",
+        roles: ["admin", "branch_rep", "top_mgmt", "technical"],
+      },
+    ],
+  },
+  {
     section: "Inventory",
     items: [
       {
@@ -27,17 +37,17 @@ const NAV: NavSection[] = [
       },
       {
         href: "/inventory/intake",
-        label: "Stock intake",
+        label: "Add New Inventory",
         roles: ["admin"],
       },
       {
         href: "/products",
-        label: "Products",
+        label: "Manage Products",
         roles: ["admin", "top_mgmt"],
       },
       {
         href: "/suppliers",
-        label: "Suppliers",
+        label: "Manage Suppliers",
         roles: ["admin", "top_mgmt"],
       },
     ],

@@ -67,7 +67,7 @@ export default async function SuppliersPage({
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold">Suppliers</h1>
+          <h1 className="text-lg font-semibold">Manage suppliers</h1>
           <p className="text-sm text-muted-foreground">
             Manage supplier records used across products and stock intake.
           </p>

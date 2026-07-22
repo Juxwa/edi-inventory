@@ -38,7 +38,7 @@ export default async function StockIntakePage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-lg font-semibold">Stock intake</h1>
+        <h1 className="text-lg font-semibold">Add new inventory</h1>
         <p className="text-sm text-muted-foreground">
           Receive new stock into a branch. Serialized products require one
           serial number per unit; other products are received by quantity.
