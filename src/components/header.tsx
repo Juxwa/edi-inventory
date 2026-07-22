@@ -1,4 +1,5 @@
-import { LogOutIcon, UserIcon } from "lucide-react";
+import Link from "next/link";
+import { KeyRoundIcon, LogOutIcon, UserIcon } from "lucide-react";
 import { signOut } from "@/app/(app)/actions";
 import { HelpButton } from "@/components/help/help-button";
 import type { Profile } from "@/lib/supabase/profile";
@@ -58,6 +59,13 @@ export function Header({ profile, branchName }: HeaderProps) {
                 {ROLE_LABEL[profile.role]}
               </p>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/reset-password" className="w-full cursor-default">
+                <KeyRoundIcon />
+                Change password
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <form action={signOut}>
               <DropdownMenuItem asChild variant="destructive">
