@@ -10,6 +10,7 @@ import {
   serialCorrectSchema,
   repairVoidSchema,
   earmoldVoidSchema,
+  stockEditSchema,
   type CorrectionActionState,
 } from "@/lib/validators/correction";
 
@@ -192,6 +193,49 @@ export async function voidRepair(
 
   revalidatePath(`/repairs/${parsed.data.repair_id}`);
   revalidatePath("/repairs");
+  revalidatePath("/admin/corrections");
+  return { ok: true };
+}
+
+export async function editStock(
+  _prevState: CorrectionActionState,
+  formData: FormData,
+): Promise<CorrectionActionState> {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
+  const parsed = stockEditSchema.safeParse({
+    stock_id: formData.get("stock_id"),
+    product_id: formData.get("product_id"),
+    cost_per_unit: formData.get("cost_per_unit"),
+    invoice_no: formData.get("invoice_no"),
+    invoice_date: formData.get("invoice_date"),
+    expiry_date: formData.get("expiry_date"),
+    is_repair_pool: formData.get("is_repair_pool") === "on",
+    is_office_asset: formData.get("is_office_asset") === "on",
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) {
+    return { ok: false, error: firstIssueMessage(parsed.error.issues) };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("stock_edit", {
+    p_stock_id: parsed.data.stock_id,
+    p_product_id: parsed.data.product_id,
+    p_cost_per_unit: parsed.data.cost_per_unit,
+    p_invoice_no: parsed.data.invoice_no,
+    p_invoice_date: parsed.data.invoice_date,
+    p_expiry_date: parsed.data.expiry_date,
+    p_is_repair_pool: parsed.data.is_repair_pool,
+    p_is_office_asset: parsed.data.is_office_asset,
+    p_reason: parsed.data.reason,
+  });
+  if (error) {
+    return { ok: false, error: rpcErrorMessage(error, "Could not edit stock.") };
+  }
+
+  revalidatePath("/inventory");
   revalidatePath("/admin/corrections");
   return { ok: true };
 }

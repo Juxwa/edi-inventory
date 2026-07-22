@@ -75,9 +75,39 @@ export const earmoldVoidSchema = z.object({
 });
 export type EarmoldVoidInput = z.infer<typeof earmoldVoidSchema>;
 
+const optionalText = z.preprocess(toOptionalText, z.string().nullable());
+
+const nonNegativeCost = z.preprocess((value: unknown) => {
+  const text = toOptionalText(value);
+  if (text === null) return null;
+  const parsed = Number.parseFloat(text);
+  return Number.isNaN(parsed) ? text : parsed;
+}, z.number().nonnegative("Cost must be zero or greater"));
+
+const requiredDate = z.preprocess(
+  toOptionalText,
+  z.string({ required_error: "Required" }).min(1, "Required"),
+);
+
+const optionalDate = z.preprocess(toOptionalText, z.string().nullable());
+
+export const stockEditSchema = z.object({
+  stock_id: requiredUuid,
+  product_id: requiredUuid,
+  cost_per_unit: nonNegativeCost,
+  invoice_no: optionalText,
+  invoice_date: requiredDate,
+  expiry_date: optionalDate,
+  is_repair_pool: z.coerce.boolean().default(false),
+  is_office_asset: z.coerce.boolean().default(false),
+  reason: requiredReason,
+});
+export type StockEditInput = z.infer<typeof stockEditSchema>;
+
 export const CORRECTION_ENTITIES = [
   "sale",
   "stock_intake",
+  "stock",
   "transfer",
   "repair",
   "earmold",

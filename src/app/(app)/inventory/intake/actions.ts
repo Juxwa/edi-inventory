@@ -6,6 +6,18 @@ import { intakeSchema } from "@/lib/validators/intake";
 
 import type { IntakeActionState } from "@/lib/validators/intake";
 
+type PostgresErrorLike = { message?: string } | null;
+
+// RPC exception messages are the whole point here (e.g. "serial % already
+// in stock at % (%)") — surface them verbatim rather than a canned
+// fallback, matching src/app/(app)/admin/corrections/actions.ts.
+function rpcErrorMessage(error: PostgresErrorLike, fallback: string): string {
+  if (error && typeof error.message === "string" && error.message.length > 0) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export async function submitIntake(
   _prevState: IntakeActionState,
   formData: FormData,
@@ -50,7 +62,7 @@ export async function submitIntake(
   });
 
   if (error) {
-    return { ok: false, error: "Could not record stock intake." };
+    return { ok: false, error: rpcErrorMessage(error, "Could not record stock intake.") };
   }
 
   const count = Array.isArray(ids)

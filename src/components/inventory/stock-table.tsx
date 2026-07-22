@@ -11,10 +11,15 @@ import type { VariantProps } from "class-variance-authority";
 import type { badgeVariants } from "@/components/ui/badge";
 import { SerialCorrectDialog } from "@/components/admin/serial-correct-dialog";
 import { VoidDialog } from "@/components/admin/void-dialog";
+import {
+  StockEditDialog,
+  type StockEditProductOption,
+} from "@/components/admin/stock-edit-dialog";
 import { voidIntake } from "@/app/(app)/admin/corrections/actions";
 
 export type StockRowData = {
   id: string;
+  product_id: string;
   product_name: string;
   serial_number: string | null;
   branch_name: string;
@@ -22,6 +27,11 @@ export type StockRowData = {
   status: string;
   cost_per_unit: number | null;
   branch_date_received: string | null;
+  supplier_invoice_no: string | null;
+  supplier_invoice_date: string | null;
+  expiry_date: string | null;
+  is_repair_pool: boolean;
+  is_office_asset: boolean;
 };
 
 type BadgeVariant = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
@@ -72,10 +82,12 @@ export function StockTable({
   rows,
   showCost = true,
   showAdminActions = false,
+  editableProducts = [],
 }: {
   rows: StockRowData[];
   showCost?: boolean;
   showAdminActions?: boolean;
+  editableProducts?: StockEditProductOption[];
 }) {
   if (rows.length === 0) {
     return (
@@ -102,7 +114,7 @@ export function StockTable({
               <TableHead className="text-right">Cost/unit</TableHead>
             ) : null}
             <TableHead>Received</TableHead>
-            {showAdminActions ? <TableHead className="w-32" /> : null}
+            {showAdminActions ? <TableHead className="w-56" /> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -141,16 +153,30 @@ export function StockTable({
               </TableCell>
               {showAdminActions ? (
                 <TableCell>
-                  <VoidDialog
-                    action={voidIntake}
-                    hiddenFields={{ stock_id: row.id }}
-                    triggerLabel="Void intake"
-                    title="Void this stock intake"
-                    description="Only stock with no activity beyond its own intake can be voided. This deletes the stock row entirely."
-                    confirmLabel="Void intake"
-                    pendingLabel="Voiding..."
-                    variant="outline"
-                  />
+                  <div className="flex items-center gap-2">
+                    <StockEditDialog
+                      stockId={row.id}
+                      currentProductId={row.product_id}
+                      currentProductLabel={row.product_name}
+                      products={editableProducts}
+                      costPerUnit={row.cost_per_unit}
+                      invoiceNo={row.supplier_invoice_no}
+                      invoiceDate={row.supplier_invoice_date}
+                      expiryDate={row.expiry_date}
+                      isRepairPool={row.is_repair_pool}
+                      isOfficeAsset={row.is_office_asset}
+                    />
+                    <VoidDialog
+                      action={voidIntake}
+                      hiddenFields={{ stock_id: row.id }}
+                      triggerLabel="Void intake"
+                      title="Void this stock intake"
+                      description="Only stock with no activity beyond its own intake can be voided. This deletes the stock row entirely."
+                      confirmLabel="Void intake"
+                      pendingLabel="Voiding..."
+                      variant="outline"
+                    />
+                  </div>
                 </TableCell>
               ) : null}
             </TableRow>

@@ -22,7 +22,10 @@ const requiredUuid = z.preprocess(
   z.string({ required_error: "Required" }).uuid({ message: "Required" }),
 );
 
+// Values reach here either as form strings or, when the line list arrives as
+// parsed JSON, as real numbers — handle both.
 const positiveQuantity = z.preprocess((value: unknown) => {
+  if (typeof value === "number") return value;
   const text = toOptionalText(value);
   if (text === null) return null;
   const parsed = Number.parseFloat(text);

@@ -46,26 +46,30 @@ const requiredDate = z.preprocess(
 
 const optionalDate = z.preprocess(toOptionalText, z.string().nullable());
 
-const nonNegativeNumber = z.preprocess((value: unknown) => {
+// Line values arrive either as form strings or, when the line list is parsed
+// from its JSON hidden field, as real numbers — coerce both shapes.
+function toNumberOrNull(value: unknown): unknown {
+  if (typeof value === "number") return value;
   const text = toOptionalText(value);
   if (text === null) return null;
   const parsed = Number.parseFloat(text);
   return Number.isNaN(parsed) ? text : parsed;
-}, z.number().min(0, "Must be zero or greater"));
+}
 
-const positiveQuantity = z.preprocess((value: unknown) => {
-  const text = toOptionalText(value);
-  if (text === null) return null;
-  const parsed = Number.parseFloat(text);
-  return Number.isNaN(parsed) ? text : parsed;
-}, z.number().positive("Quantity must be greater than zero"));
+const nonNegativeNumber = z.preprocess(
+  toNumberOrNull,
+  z.number().min(0, "Must be zero or greater"),
+);
 
-const optionalNonNegativeNumber = z.preprocess((value: unknown) => {
-  const text = toOptionalText(value);
-  if (text === null) return null;
-  const parsed = Number.parseFloat(text);
-  return Number.isNaN(parsed) ? text : parsed;
-}, z.number().min(0, "Must be zero or greater").nullable());
+const positiveQuantity = z.preprocess(
+  toNumberOrNull,
+  z.number().positive("Quantity must be greater than zero"),
+);
+
+const optionalNonNegativeNumber = z.preprocess(
+  toNumberOrNull,
+  z.number().min(0, "Must be zero or greater").nullable(),
+);
 
 const booleanFromFormString = z.preprocess((value: unknown) => {
   if (typeof value === "boolean") return value;

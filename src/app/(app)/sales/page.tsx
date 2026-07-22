@@ -187,6 +187,13 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
   const canRecord = profile.role === "admin" || profile.role === "branch_rep";
   const hasFilters = fromDate || toDate || branchParam || q;
 
+  const exportParams = new URLSearchParams();
+  if (fromDate) exportParams.set("from", fromDate);
+  if (toDate) exportParams.set("to", toDate);
+  if (branchParam) exportParams.set("branch", branchParam);
+  if (q) exportParams.set("q", q);
+  const exportHref = `/sales/export${exportParams.toString() ? `?${exportParams.toString()}` : ""}`;
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -196,14 +203,19 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
             Browse recorded sales, filter by date, branch, or customer.
           </p>
         </div>
-        {canRecord ? (
-          <Button asChild>
-            <Link href="/sales/new">
-              <PlusIcon className="size-4" />
-              Record sale
-            </Link>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href={exportHref}>Export CSV</Link>
           </Button>
-        ) : null}
+          {canRecord ? (
+            <Button asChild>
+              <Link href="/sales/new">
+                <PlusIcon className="size-4" />
+                Record sale
+              </Link>
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <form className="flex flex-wrap items-end gap-3" method="get">

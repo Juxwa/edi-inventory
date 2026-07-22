@@ -135,6 +135,11 @@ const NAV: NavSection[] = [
         label: "Corrections log",
         roles: ["admin"],
       },
+      {
+        href: "/admin/duplicates",
+        label: "Duplicate serials",
+        roles: ["admin"],
+      },
     ],
   },
   {

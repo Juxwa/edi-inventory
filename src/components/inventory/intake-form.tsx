@@ -195,6 +195,10 @@ export function IntakeForm({ products, branches, suppliers }: IntakeFormProps) {
               </span>
             ) : null}
           </p>
+          <p className="text-sm text-muted-foreground">
+            Duplicate serials are ignored; serials already in stock will be
+            rejected.
+          </p>
         </div>
       ) : (
         <div className="grid gap-1.5 sm:w-64">

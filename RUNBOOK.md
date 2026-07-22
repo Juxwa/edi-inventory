@@ -723,3 +723,64 @@ Watch particularly for:
 - The previous-period comparison is computed at month granularity (matches the views' `date_trunc('month', ...)` grain): both the current and previous ranges get truncated to whole months before comparison, so a custom `from`/`to` that lands mid-month will compare against whole preceding months, not a day-for-day mirror. This mirrors an existing quirk already present in `reports/sales`'s own `.gte("month", filters.from)` filtering (a custom `from` date after the 1st of its month can under-include that month's row) — not a new bug introduced here, just inherited from the same pattern.
 - Trend chart caps at the top 6 branches by total revenue for the selected period, folding the rest into "Others" — if a client wants every branch broken out regardless of count, that's a follow-up, not a bug.
 - "Average sale value" ignores the category filter (a single sale can mix categories, so category-scoping a whole-sale count doesn't have a clean meaning) — the SKU/service/branch tables and the rest of the KPIs do respect the category filter.
+
+# Phase 6b — Client feedback round 2: duplicate-serial guard (BUG), stock edit, sales CSV (2026-07-22)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint, Glob avoided per `(app)` path issue). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build. Migrations used: `0024_intake_dedupe_guard.sql`, `0025_stock_edit.sql`.
+
+## 1. Push the schema
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected:
+- `0024_intake_dedupe_guard.sql` — `create or replace function stock_intake(...)`, same signature as `0007`, with two changes ahead of any insert: (a) the incoming serial array is trimmed, empties dropped, and de-duplicated (`array_agg(distinct ...)`); (b) every serial in that cleaned batch is checked against existing `stock` rows (case-insensitive, trimmed) **before any insert happens** — a batch with one bad serial fails cleanly with `serial % already in stock at % (%)` (branch name, status) rather than half-importing. Also adds a `stock_duplicate_serials` view (`security_invoker = on`, rides the existing admin/top_mgmt-only `stock_read` policy) listing every stock row whose serial collides with another. **No hard unique constraint was added** to `stock.serial_number` — legacy imported data may already have duplicates; a commented cleanup query is in the migration file for later use.
+- `0025_stock_edit.sql` — new `security definer` RPC `stock_edit(...)`, admin-gated, reason required, row-locked, writes an `admin_corrections` row (`entity = 'stock'`, `action = 'edit'`) exactly like the RPCs in `0022`. Refuses to run once a stock row has moved past `available/reserved/under_repair/for_replacement/consignment` ("stock has moved — use a correction instead"). Never touches `serial_number` or `quantity`.
+
+Verify in the dashboard: Database → Functions shows `stock_intake` (unchanged signature, `plpgsql`, not security definer — matches `0007`) and `stock_edit` (`plpgsql`, security definer). Database → Views shows `stock_duplicate_serials`.
+
+## 2. Build
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- No generated `Database` type exists in this repo (same caveat as every prior phase) — every new `.rpc(...)` / `.from("stock_duplicate_serials")` call is loosely typed; a typo'd param or column name only surfaces at runtime.
+- `src/app/(app)/sales/export/route.ts` is new and duplicates a fair amount of `/sales`'s filter-resolution logic (`src/app/(app)/sales/page.tsx`) rather than importing a shared helper — unlike `reports/sales`, there's no existing `query.ts` shared between `/sales` and this export, so filter drift is a real risk if `/sales`'s filters ever change; if you touch one, touch the other.
+- `src/lib/validators/correction.ts` gained a second, unexported `optionalText`/`requiredDate`/`optionalDate`/`nonNegativeCost` block below the existing schemas (for `stockEditSchema`) — deliberately not merged with the file's original `toOptionalText`-based consts up top; check this compiles cleanly, no naming collisions were intended but double check given both blocks share `toOptionalText`.
+
+## 3. Manual checklist — intake duplicate guard (item 1, BUG — test first)
+
+- On `/inventory/intake` as admin, pick a serialized product, paste **the same serial number twice** (with different casing/whitespace, e.g. `SN-001` and ` sn-001 `) plus one more unique serial, submit. Expect: exactly **one** row created for the duplicated serial (not two) and one for the unique serial — 2 rows total, "2 units received."
+- Intake a serial (e.g. `SN-100`), submit successfully. Then try to intake `SN-100` again (same or different branch) → expect a clean rejection toast naming the branch and status, e.g. **"serial SN-100 already in stock at <branch> (available)"** — not a generic error, and no new row created.
+- Intake a batch of 3 serials where the 2nd one already exists in stock → expect the **whole batch to fail** (0 new rows), not 1 succeeding and 2 failing partial import. Confirm in the SQL editor that no new `stock` rows exist for any of the 3.
+- Confirm the hint text "Duplicate serials are ignored; serials already in stock will be rejected." appears under the serial textarea on `/inventory/intake`.
+- Visit `/admin/duplicates` (new nav link under Admin, admin-only). If any legacy duplicate serials exist in the imported data, they list here grouped implicitly by serial (sorted by serial), each row showing product, branch, status, quantity, received date. A non-admin hitting this URL directly should redirect to `/`.
+
+## 4. Manual checklist — stock edit (item 3)
+
+- On `/inventory` as admin, each row now shows an **Edit** button next to **Void intake**. Click it → dialog opens pre-filled with the current product, cost, invoice no./date, expiry, repair-pool/office-asset checkboxes.
+- Change the product (search/select a different one) and the invoice no., leave a reason, save. Expect: toast "Stock updated.", row's product name updates on `/inventory`.
+- Visit `/admin/corrections` → a new row: entity **Stock**, action **edit**, your admin name, the reason, expandable Before/After JSON showing the product_id/invoice fields changed (and unchanged `serial_number`/`quantity`).
+- Change only the cost per unit, save → confirm `total_cost` in the SQL editor recomputed as `cost_per_unit * quantity` for that row.
+- Try editing a stock row that has already been sold/transferred (status outside available/reserved/under_repair/for_replacement/consignment) → expect the RPC to reject with **"stock has moved — use a correction instead"**.
+- Submit with no reason → Save button stays disabled (client-side), and if bypassed, the RPC itself rejects with "reason required".
+- As a non-admin, confirm no Edit button appears anywhere on `/inventory`, and calling `stock_edit` directly via devtools fails with "admin only".
+
+## 5. Manual checklist — sales CSV export (item 2)
+
+- On `/sales`, an **Export CSV** button now sits next to **Record sale** (visible to admin, branch_rep, top_mgmt — everyone who can view sales history; branch_rep's export is scoped to their own branch by RLS, not by hiding the button).
+- Apply some filters (date range, branch [admin/top_mgmt only], search term), click Export CSV → confirm the downloaded filename is `sales-history-<date>.csv` and its rows match what's currently filtered on screen (one row per sale line item, not per sale — a 3-line sale produces 3 CSV rows).
+- Confirm columns: Sale date, OR no., CSI no., CI no., Customer, Branch, Sold by, Line type, Product/service, Serial, Quantity, Unit price, Line total, Discount, Paid, After-sales status, Voided. Discount is populated only on each sale's **first** CSV row (documented in the route file) — don't sum it per-line or it'll be double-counted.
+- Void a test sale, then export again with a date range covering it → confirm the voided sale **still appears** in the CSV with `Voided = yes` (voided sales are excluded from the on-screen list but not from the export — accounting needs them).
+- **Cost-leak check (do this one explicitly):** log in as a `branch_rep`, export CSV → open the file and confirm there is **no** cost-per-unit or unit-cost column anywhere, and every row's Branch column is the rep's own branch only. Log in as admin/top_mgmt, export the same date range → confirm rows span multiple branches and still have no cost column (cost is intentionally excluded for everyone, not just branch reps — this export isn't a costing report).
+
+## 6. Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo — same caveat as every prior phase.
+- `stock_duplicate_serials` does a self-join with `lower(trim(serial_number))` equality and no supporting expression index — fine at current data volume (~20k stock rows), revisit if the duplicates list becomes slow to load.
+- The sales CSV export re-derives `/sales`'s q-search and branch-locking logic inline (see build note above) rather than sharing a `query.ts` module the way `/reports/sales` does — a deliberate scope-limiting choice for this session; consider factoring it out if `/sales`'s filters grow more complex.
+- `stock_edit` always recomputes `total_cost = cost_per_unit * quantity` (even when cost is unchanged) rather than conditionally recomputing only on a real change — harmless since the result is identical either way, just simpler code than the spec's literal "when cost changes" wording.
+- `submitIntake` (`src/app/(app)/inventory/intake/actions.ts`) previously swallowed every RPC error behind a generic "Could not record stock intake." message — fixed in this session to surface the RPC's real message (needed so the new duplicate-serial rejection text actually reaches the user); flagged here since the task description implied this already worked and it did not.

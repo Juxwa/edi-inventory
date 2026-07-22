@@ -52,11 +52,17 @@ function parsePoolFilter(value: string | undefined): StockPoolFilter {
 
 type StockQueryRow = {
   id: string;
+  product_id: string;
   quantity: number;
   serial_number: string | null;
   status: string;
   cost_per_unit: number | null;
   branch_date_received: string | null;
+  supplier_invoice_no: string | null;
+  supplier_invoice_date: string | null;
+  expiry_date: string | null;
+  is_repair_pool: boolean;
+  is_office_asset: boolean;
   products: { name: string } | { name: string }[] | null;
   branches: { name: string } | { name: string }[] | null;
 };
@@ -120,7 +126,7 @@ export default async function InventoryPage({
   let query = supabase
     .from("stock_visible")
     .select(
-      "id, quantity, serial_number, status, cost_per_unit, branch_date_received, products(name), branches(name)",
+      "id, product_id, quantity, serial_number, status, cost_per_unit, branch_date_received, supplier_invoice_no, supplier_invoice_date, expiry_date, is_repair_pool, is_office_asset, products(name), branches(name)",
       { count: "exact" },
     )
     .order("branch_date_received", { ascending: false, nullsFirst: false })
@@ -158,8 +164,20 @@ export default async function InventoryPage({
   const { data, count } = await query;
   const rows: StockQueryRow[] = (data as StockQueryRow[] | null) ?? [];
 
+  const isAdmin = profile?.role === "admin";
+  let editableProducts: { id: string; name: string; code: string | null }[] = [];
+  if (isAdmin) {
+    const { data: productOptions } = await supabase
+      .from("products")
+      .select("id, name, code")
+      .eq("archived", false)
+      .order("name");
+    editableProducts = productOptions ?? [];
+  }
+
   const stock: StockRowData[] = rows.map((row: StockQueryRow) => ({
     id: row.id,
+    product_id: row.product_id,
     product_name: firstOrNull(row.products)?.name ?? "—",
     serial_number: row.serial_number,
     branch_name: firstOrNull(row.branches)?.name ?? "—",
@@ -167,6 +185,11 @@ export default async function InventoryPage({
     status: row.status,
     cost_per_unit: row.cost_per_unit,
     branch_date_received: row.branch_date_received,
+    supplier_invoice_no: row.supplier_invoice_no,
+    supplier_invoice_date: row.supplier_invoice_date,
+    expiry_date: row.expiry_date,
+    is_repair_pool: row.is_repair_pool,
+    is_office_asset: row.is_office_asset,
   }));
 
   const total = count ?? 0;
@@ -294,7 +317,8 @@ export default async function InventoryPage({
       <StockTable
         rows={stock}
         showCost={canFilterByBranch}
-        showAdminActions={profile?.role === "admin"}
+        showAdminActions={isAdmin}
+        editableProducts={editableProducts}
       />
 
       {total > 0 && (
