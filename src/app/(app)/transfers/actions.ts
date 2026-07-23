@@ -238,7 +238,7 @@ export async function receiveLine(
 ): Promise<TransferActionState> {
   const parsed = receiveLineSchema.safeParse({
     line_id: formData.get("line_id"),
-    confirm: formData.get("confirm"),
+    received_quantity: formData.get("received_quantity"),
     note: formData.get("note"),
   });
 
@@ -251,7 +251,7 @@ export async function receiveLine(
   const supabase = await createClient();
   const { error } = await supabase.rpc("transfer_receive_line", {
     p_line_id: parsed.data.line_id,
-    p_confirm: parsed.data.confirm,
+    p_received_quantity: parsed.data.received_quantity,
     p_note: parsed.data.note,
   });
 

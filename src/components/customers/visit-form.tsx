@@ -119,6 +119,18 @@ export function VisitForm({ customerId }: { customerId: string }) {
             Purchase made during this visit
           </label>
 
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              name="is_hearing_test"
+              value="true"
+              disabled={pending}
+              className="size-4 rounded border-input"
+            />
+            This is a hearing test (attach the test file above so top
+            management can review it)
+          </label>
+
           {state.error ? (
             <p role="alert" className="text-sm font-medium text-destructive">
               {state.error}

@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import {
   TransferStatusBadge,
   StaleDraftBadge,
@@ -25,7 +26,12 @@ export type TransferRowData = {
   received_date: string | null;
   courier: string | null;
   created_at: string;
+  has_discrepancy: boolean;
 };
+
+function DiscrepancyBadge() {
+  return <Badge variant="destructive">Discrepancy</Badge>;
+}
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -83,6 +89,7 @@ export function TransferTable({ rows }: { rows: TransferRowData[] }) {
                   {isStaleDraft(row.status, row.created_at) ? (
                     <StaleDraftBadge />
                   ) : null}
+                  {row.has_discrepancy ? <DiscrepancyBadge /> : null}
                 </div>
               </TableCell>
               <TableCell className="text-right tabular-nums">

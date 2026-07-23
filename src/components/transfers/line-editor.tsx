@@ -20,6 +20,7 @@ export type TransferLineRowData = {
   serial_snapshot: string | null;
   quantity: number;
   received_confirmed: boolean;
+  received_quantity: number | null;
   received_note: string | null;
   is_repair_pool: boolean;
 };
@@ -111,6 +112,18 @@ function RepairPoolBadge() {
   return <Badge variant="warning">Repair pool</Badge>;
 }
 
+function DiscrepancyBadge() {
+  return <Badge variant="destructive">Discrepancy</Badge>;
+}
+
+function isLineDiscrepant(line: TransferLineRowData): boolean {
+  return (
+    line.received_confirmed &&
+    line.received_quantity !== null &&
+    line.received_quantity < line.quantity
+  );
+}
+
 export function TransferLinesTable({
   lines,
   canCorrectSerial = false,
@@ -170,7 +183,14 @@ export function TransferLinesTable({
                 {line.quantity}
               </TableCell>
               {hasReceiveColumns ? (
-                <TableCell>{line.received_confirmed ? "Yes" : "No"}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5">
+                    {line.received_confirmed
+                      ? `${line.received_quantity ?? 0} of ${line.quantity}`
+                      : "No"}
+                    {isLineDiscrepant(line) ? <DiscrepancyBadge /> : null}
+                  </div>
+                </TableCell>
               ) : null}
               {hasReceiveColumns ? (
                 <TableCell className="text-muted-foreground">

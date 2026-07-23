@@ -109,6 +109,7 @@ export async function logVisit(
     visit_date: formData.get("visit_date"),
     purpose: formData.get("purpose"),
     purchased_during_visit: formData.get("purchased_during_visit"),
+    is_hearing_test: formData.get("is_hearing_test"),
     remarks: formData.get("remarks"),
   });
 
@@ -125,6 +126,7 @@ export async function logVisit(
       visit_date: parsed.data.visit_date,
       purpose: parsed.data.purpose,
       purchased_during_visit: parsed.data.purchased_during_visit,
+      is_hearing_test: parsed.data.is_hearing_test,
       remarks: parsed.data.remarks,
     })
     .select("id")

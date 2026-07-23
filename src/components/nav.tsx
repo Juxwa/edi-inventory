@@ -78,6 +78,16 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    section: "Clinical",
+    items: [
+      {
+        href: "/hearing-tests",
+        label: "Hearing tests",
+        roles: ["admin", "top_mgmt"],
+      },
+    ],
+  },
+  {
     section: "Transfers",
     items: [
       {

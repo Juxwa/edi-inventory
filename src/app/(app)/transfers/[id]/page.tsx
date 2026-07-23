@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/supabase/profile";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -121,7 +122,9 @@ export default async function TransferDetailPage({
   // Database types a two-level embed's response shape is not reliable.
   const { data: lineRows } = await supabase
     .from("transfer_line_items")
-    .select("id, quantity, serial_snapshot, received_confirmed, received_note, stock_id")
+    .select(
+      "id, quantity, serial_snapshot, received_confirmed, received_quantity, received_note, stock_id",
+    )
     .eq("transfer_id", transferRow.id);
 
   type RawLineRow = {
@@ -129,6 +132,7 @@ export default async function TransferDetailPage({
     quantity: number;
     serial_snapshot: string | null;
     received_confirmed: boolean;
+    received_quantity: number | null;
     received_note: string | null;
     stock_id: string | null;
   };
@@ -170,6 +174,7 @@ export default async function TransferDetailPage({
     serial_snapshot: line.serial_snapshot,
     quantity: line.quantity,
     received_confirmed: line.received_confirmed,
+    received_quantity: line.received_quantity,
     received_note: line.received_note,
     is_repair_pool: line.stock_id
       ? (poolByStockId.get(line.stock_id) ?? false)
@@ -183,6 +188,12 @@ export default async function TransferDetailPage({
   const canReceive = isAdmin || isToBranchUser;
 
   const receiveLines: ReceiveLineRowData[] = lines;
+  const hasDiscrepancy = lines.some(
+    (line: TransferLineRowData) =>
+      line.received_confirmed &&
+      line.received_quantity !== null &&
+      line.received_quantity < line.quantity,
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -200,6 +211,7 @@ export default async function TransferDetailPage({
             {isStaleDraft(transferRow.status, transferRow.created_at) ? (
               <StaleDraftBadge />
             ) : null}
+            {hasDiscrepancy ? <Badge variant="destructive">Discrepancy</Badge> : null}
           </div>
           <p className="text-sm text-muted-foreground">
             {branchNameById.get(transferRow.from_branch_id) ?? "—"} {"→"}{" "}
@@ -255,15 +267,16 @@ export default async function TransferDetailPage({
             <p className="font-medium">{formatDate(transferRow.received_date)}</p>
           </div>
           <div>
+            <p className="text-muted-foreground">SIS number (internal)</p>
+            <p className="font-medium">{transferRow.sis_no ?? "—"}</p>
+          </div>
+          <div>
             <p className="text-muted-foreground">Courier</p>
             <p className="font-medium">{transferRow.courier ?? "—"}</p>
           </div>
           <div>
-            <p className="text-muted-foreground">Tracking / SIS</p>
-            <p className="font-medium">
-              {transferRow.tracking_code ?? "—"}
-              {transferRow.sis_no ? ` / ${transferRow.sis_no}` : ""}
-            </p>
+            <p className="text-muted-foreground">Courier tracking / waybill no.</p>
+            <p className="font-medium">{transferRow.tracking_code ?? "—"}</p>
           </div>
           {transferRow.request_id ? (
             <div>

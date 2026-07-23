@@ -66,15 +66,19 @@ export const dispatchTransferSchema = z.object({
 });
 export type DispatchTransferInput = z.infer<typeof dispatchTransferSchema>;
 
-const booleanFromFormString = z.preprocess((value: unknown) => {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value.trim().toLowerCase() === "true";
-  return false;
-}, z.boolean());
+// Received quantity arrives either as a form string or, when the value is
+// built client-side from state, as a real number — handle both.
+const nonNegativeQuantity = z.preprocess((value: unknown) => {
+  if (typeof value === "number") return value;
+  const text = toOptionalText(value);
+  if (text === null) return null;
+  const parsed = Number.parseFloat(text);
+  return Number.isNaN(parsed) ? text : parsed;
+}, z.number({ required_error: "Required" }).min(0, "Received quantity must be zero or more"));
 
 export const receiveLineSchema = z.object({
   line_id: requiredUuid,
-  confirm: booleanFromFormString,
+  received_quantity: nonNegativeQuantity,
   note: optionalText,
 });
 export type ReceiveLineInput = z.infer<typeof receiveLineSchema>;

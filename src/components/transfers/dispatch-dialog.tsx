@@ -56,18 +56,18 @@ export function DispatchDialog({ transferId }: { transferId: string }) {
           <input type="hidden" name="transfer_id" value={transferId} />
 
           <div className="grid gap-1.5">
+            <Label htmlFor="sis_no">SIS number (internal)</Label>
+            <Input id="sis_no" name="sis_no" disabled={pending} />
+          </div>
+
+          <div className="grid gap-1.5">
             <Label htmlFor="courier">Courier</Label>
             <Input id="courier" name="courier" required disabled={pending} />
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="tracking_code">Tracking code (optional)</Label>
+            <Label htmlFor="tracking_code">Courier tracking / waybill no.</Label>
             <Input id="tracking_code" name="tracking_code" disabled={pending} />
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="sis_no">SIS no. (optional)</Label>
-            <Input id="sis_no" name="sis_no" disabled={pending} />
           </div>
 
           {state.error ? (

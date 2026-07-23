@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 
-const VISIT_FILES_BUCKET = "visit-files";
-const SIGNED_URL_TTL_SECONDS = 3600;
+export const VISIT_FILES_BUCKET = "visit-files";
+export const SIGNED_URL_TTL_SECONDS = 3600;
 
 export type VisitRowData = {
   id: string;
@@ -11,7 +11,11 @@ export type VisitRowData = {
   purchased_during_visit: boolean;
   remarks: string | null;
   attachment_paths: string[] | null;
+  is_hearing_test?: boolean;
+  reviewed_at?: string | null;
 };
+
+export type AttachmentLink = { path: string; url: string | null; name: string };
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -27,12 +31,12 @@ function filenameFromPath(path: string): string {
   return segments[segments.length - 1] ?? path;
 }
 
-async function resolveAttachmentLinks(
+export async function resolveAttachmentLinks(
   paths: string[] | null,
-): Promise<{ path: string; url: string | null; name: string }[]> {
+): Promise<AttachmentLink[]> {
   if (!paths || paths.length === 0) return [];
   const supabase = await createClient();
-  const results: { path: string; url: string | null; name: string }[] = [];
+  const results: AttachmentLink[] = [];
   for (const path of paths) {
     const { data } = await supabase.storage
       .from(VISIT_FILES_BUCKET)
@@ -88,6 +92,18 @@ export function VisitList({ visits }: { visits: VisitRowData[] }) {
               {visit.purpose ? <Badge variant="outline">{visit.purpose}</Badge> : null}
               {visit.purchased_during_visit ? (
                 <Badge variant="success">Purchase made</Badge>
+              ) : null}
+              {visit.is_hearing_test ? (
+                <>
+                  <Badge variant="secondary">Hearing test</Badge>
+                  {visit.reviewed_at ? (
+                    <Badge variant="success">
+                      Reviewed {formatDate(visit.reviewed_at ?? null)}
+                    </Badge>
+                  ) : (
+                    <Badge variant="warning">Awaiting review</Badge>
+                  )}
+                </>
               ) : null}
             </div>
           </div>

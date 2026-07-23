@@ -98,6 +98,33 @@ export default async function TransfersPage({
     ]),
   );
 
+  // Discrepancy lookup is a second, targeted query rather than a nested
+  // embed (unreliable response shape without generated DB types) — fetch
+  // just the transfer ids on this page that have at least one short line.
+  const transferIds = rows.map((row: TransferQueryRow) => row.id);
+  let discrepantTransferIds = new Set<string>();
+  if (transferIds.length > 0) {
+    const { data: discrepancyRows } = await supabase
+      .from("transfer_line_items")
+      .select("transfer_id, quantity, received_quantity")
+      .in("transfer_id", transferIds)
+      .not("received_quantity", "is", null);
+    type DiscrepancyRow = {
+      transfer_id: string;
+      quantity: number;
+      received_quantity: number | null;
+    };
+    const discrepancies: DiscrepancyRow[] = (discrepancyRows as DiscrepancyRow[] | null) ?? [];
+    discrepantTransferIds = new Set(
+      discrepancies
+        .filter(
+          (row: DiscrepancyRow) =>
+            row.received_quantity !== null && row.received_quantity < row.quantity,
+        )
+        .map((row: DiscrepancyRow) => row.transfer_id),
+    );
+  }
+
   const transfers: TransferRowData[] = rows.map((row: TransferQueryRow) => ({
     id: row.id,
     code: row.code,
@@ -109,6 +136,7 @@ export default async function TransfersPage({
     received_date: row.received_date,
     courier: row.courier,
     created_at: row.created_at,
+    has_discrepancy: discrepantTransferIds.has(row.id),
   }));
 
   const total = count ?? 0;

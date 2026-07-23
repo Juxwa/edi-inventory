@@ -78,6 +78,7 @@ export const logVisitSchema = z.object({
   visit_date: requiredDate,
   purpose: optionalText,
   purchased_during_visit: booleanFromFormString,
+  is_hearing_test: booleanFromFormString,
   remarks: optionalText,
 });
 export type LogVisitInput = z.infer<typeof logVisitSchema>;

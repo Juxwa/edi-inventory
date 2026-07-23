@@ -84,7 +84,9 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
       .limit(PURCHASES_LIMIT),
     supabase
       .from("visits")
-      .select("id, visit_date, purpose, purchased_during_visit, remarks, attachment_paths")
+      .select(
+        "id, visit_date, purpose, purchased_during_visit, remarks, attachment_paths, is_hearing_test, reviewed_at",
+      )
       .eq("customer_id", id)
       .order("visit_date", { ascending: false }),
   ]);

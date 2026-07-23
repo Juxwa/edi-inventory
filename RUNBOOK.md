@@ -784,3 +784,121 @@ Watch particularly for:
 - The sales CSV export re-derives `/sales`'s q-search and branch-locking logic inline (see build note above) rather than sharing a `query.ts` module the way `/reports/sales` does — a deliberate scope-limiting choice for this session; consider factoring it out if `/sales`'s filters grow more complex.
 - `stock_edit` always recomputes `total_cost = cost_per_unit * quantity` (even when cost is unchanged) rather than conditionally recomputing only on a real change — harmless since the result is identical either way, just simpler code than the spec's literal "when cost changes" wording.
 - `submitIntake` (`src/app/(app)/inventory/intake/actions.ts`) previously swallowed every RPC error behind a generic "Could not record stock intake." message — fixed in this session to surface the RPC's real message (needed so the new duplicate-serial rejection text actually reaches the user); flagged here since the task description implied this already worked and it did not.
+
+---
+
+# Phase 6c Runbook — Items A-B (SIS/courier separation, partial receiving)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build.
+
+## 1. Push migration 0027
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: `0027_transfer_partial_receiving.sql` applies cleanly. It adds `transfer_line_items.received_quantity` (numeric, nullable) and replaces `transfer_receive_line` — the old 3-arg `(p_line_id uuid, p_confirm boolean, p_note text)` overload is explicitly dropped and a new one, `(p_line_id uuid, p_received_quantity numeric, p_note text default null)`, is created. Verify in the dashboard: Database → Functions → `transfer_receive_line` shows only one entry now, with the new 3-param signature; Table Editor → `transfer_line_items` has the new `received_quantity` column.
+
+Item A (SIS vs courier) needed **no migration** — `transfers.sis_no`, `courier`, `tracking_code` and the `transfer_dispatch(p_transfer_id, p_courier, p_tracking_code, p_sis_no)` RPC already existed from 0009 with all three params wired through `dispatchTransferSchema` → `dispatchTransfer` action → RPC. This session only reordered/relabeled the three dispatch-dialog inputs and split the transfer-detail header's combined "Tracking / SIS" line into two separately labeled lines.
+
+## 2. How dispatch/reserve leave stock (verified before writing the split logic)
+
+- `transfer_reserve` (0009, unchanged): a full-row line marks the existing stock row `'reserved'` in place, still at the origin `branch_id`. A partial-quantity line splits a **new** stock row off at the origin branch (`status 'reserved'`, `quantity = line.quantity`) and repoints `transfer_line_items.stock_id` at it.
+- `transfer_dispatch` (0009, unchanged): marks that same stock row `'transferred'` — `branch_id` stays the origin branch; dispatch never moves the row.
+- So throughout `in_transit`, a line's `stock_id` always points at a row physically "at" `from_branch_id`, `status = 'transferred'`, `quantity = line.quantity`. The new `transfer_receive_line` is what finally relocates it, and that's where the split math below applies.
+
+## 3. Build and fix loop
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- `src/app/(app)/transfers/actions.ts`'s `receiveLine` now sends `p_received_quantity` instead of `p_confirm` — matches the new RPC signature exactly.
+- `src/lib/validators/transfer.ts`'s `receiveLineSchema` dropped the `confirm` boolean field and `booleanFromFormString` helper entirely (no longer used anywhere in this file) in favor of `received_quantity` via a `nonNegativeQuantity` preprocessor (mirrors `positiveQuantity` in the same file / `request.ts`'s numeric-coercion pattern — handles both a JSON number and a form string).
+- `src/components/transfers/receive-panel.tsx` was rewritten: each unresolved line renders `ReceiveLineForm` — a serialized line (`quantity === 1` and `serial_snapshot` present) gets a Received/Not received toggle (posts `received_quantity` 1 or 0); every other line gets a number input (default = expected qty, `min=0`/`max=expected`) plus a note field that becomes `required` and gets a destructive border the moment the entered quantity differs from expected. Already-resolved lines show `Received X of Y` and a red "Discrepancy" badge when `X < Y`.
+- `src/components/transfers/line-editor.tsx`'s `TransferLinesTable` (the read-only view once a transfer is no longer `draft`/`in_transit`) now shows `X of Y` instead of a plain Yes/No, with the same discrepancy badge.
+- `src/app/(app)/transfers/[id]/page.tsx` fetches the new `received_quantity` column, threads it through `TransferLineRowData`, and shows a header-level "Discrepancy" badge (next to the status badge) when any line is short.
+- `src/app/(app)/transfers/page.tsx` (the `/transfers` list) runs one extra targeted query — `transfer_line_items` filtered to the current page's transfer ids with `received_quantity` not null — to build a `Set` of transfer ids with at least one short line, then passes `has_discrepancy` into `TransferTable`. This is a second query rather than a nested embed, consistent with this codebase's "Map joins not embeds" convention.
+
+## 4. Manual checklist — Item A (SIS vs courier)
+
+- Open a `reserved` transfer as admin/from-branch user, click **Dispatch**. Confirm three separate labeled fields, in this order: "SIS number (internal)" (optional), "Courier" (required — blank submit is blocked by the browser), "Courier tracking / waybill no." (optional).
+- Fill all three distinctly (e.g. SIS `SIS-001`, Courier `LBC`, Tracking `WB-99887`) and submit → transfer flips to **In transit**.
+- On the transfer detail page's Details card, confirm SIS number, Courier, and Courier tracking / waybill no. each show on their own labeled line with the exact values entered (not concatenated).
+
+## 5. Manual checklist — Item B (partial/discrepant receiving)
+
+Seed data needed: an `in_transit` transfer with (a) one lot line for quantity 300 of a non-serialized product, and (b) one serialized line.
+
+- **Short lot receipt:** as the to-branch user (or admin), open the Receive panel. On the 300-qty line, change the received-quantity box to 200 → the note field immediately gets a red border and becomes required. Try submitting with no note → browser blocks it (or, if bypassed, the RPC raises "discrepancy note required"). Fill a note (e.g. "2 boxes damaged in transit") and click **Confirm receipt** → row now reads "Received 200 of 300" with a red "Discrepancy" badge and the note text.
+  - In the SQL editor: confirm the original stock row for that line is now `branch_id = to_branch`, `status = 'available'`, `quantity = 200`. Confirm a **second** stock row now exists at `branch_id = from_branch` (origin), `status = 'available'`, `quantity = 100`, with the same `product_id`/`cost_per_unit`/`supplier_invoice_no` as the original. Confirm `stock_movements` has a `transfer_in` row for 200 (origin→destination) and a second `transfer_in` row for 100 with `from_branch_id`/`to_branch_id` reversed (destination→origin) and a note starting "shortfall returned to origin:". Add the two movement quantities (200 + 100) — they must equal the original line quantity (300); no units created or destroyed.
+- **Serialized line, Not received:** on the serialized line, click **Not received** (no number box — a 1/0 toggle) → note required (e.g. "unit missing from box"), submit. Confirm the row reads "Received 0 of 1" with the Discrepancy badge, and in the SQL editor the stock row is back at the origin branch, `status = 'available'` (not `'available'` at destination) — no split row is created for a serialized line.
+- **Full receipt:** on a third, unmodified line, leave the received-quantity box at its default (= expected qty), leave the note blank, click **Confirm receipt** → resolves immediately with no discrepancy badge, no note required. Confirm the stock row moved entirely to the destination branch as `available` and exactly one `transfer_in` movement was recorded for the full quantity.
+- Once every line on the transfer is resolved (confirmed with any quantity, including 0), the transfer should flip to **Confirmed** automatically — same completion rule as before, just simplified since every line is now `received_confirmed = true` once processed (open/closed is no longer split across a separate "noted but not confirmed" state).
+- **Discrepancy badges roll up:** back on `/transfers`, the list row for this transfer shows a red "Discrepancy" badge next to its status. On the transfer detail page, the header also shows the badge next to the status badge.
+
+## 6. Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo — same caveat as every prior phase; the `transfer_receive_line` RPC call in `actions.ts` is loosely typed and a param-name typo would only surface at runtime.
+- `received_quantity` is nullable (lines not yet received have `null`, not `0`) — this is intentional, distinguishing "not yet processed" from "confirmed receipt of zero units"; every discrepancy check in the UI/RPC guards on `received_confirmed` being true before comparing `received_quantity < quantity`, so an unprocessed line never falsely reads as a discrepancy.
+- The new split-stock row created for a shortfall at the origin does not carry forward `legacy_id` (there isn't one to copy) or `return_date` (this isn't a sales return) — it's a fresh row exactly like a lot split at `transfer_reserve` time, just running in reverse.
+- `transfer_receive_line`'s existing "not found" gap on `v_transfer` (no explicit `if not found` check right after selecting it, relying on the foreign key for practical safety) was preserved as-is from the original 0009 definition per the "copy faithfully" instruction — not a new issue introduced this session.
+
+---
+
+# Phase 6c Runbook — Item C (hearing-test review workflow)
+
+Built entirely with Read/Write/Edit tools this session (bash tool unusable per environment constraint, Glob avoided for `(app)` paths). **None of this has been compiled or run.** Treat the first `npm run build` as the real first build. Migration used: `0028_hearing_test_review.sql`.
+
+## 1. Push migration 0028
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: `0028_hearing_test_review.sql` applies cleanly. It adds five columns to `visits` — `is_hearing_test boolean not null default false`, `reviewed_at timestamptz`, `reviewed_by uuid references profiles(id)`, `review_notes text`, `resulted_in_sale_id uuid references sales(id)` — and one new RLS policy, `visits_review_write` (`for update`, `using`/`with check` both `auth_role() in ('admin','top_mgmt')`). Verify in the dashboard: Table Editor → `visits` has the five new columns; Authentication → Policies → `visits` shows `visits_review_write` alongside the existing `visits_read`/`visits_write` from 0012.
+
+**Exact RLS change, spelled out:** 0012's `visits_write` already grants `for all` (insert/update/delete) to `admin`, `branch_rep`, and `top_mgmt` with no branch scoping at all (`visits` carries no `branch_id` column to scope against — that's pre-existing, not something this session touched). That means, at the raw Postgres level, `branch_rep` already had the technical ability to write the new `review_*` columns on any visit before this migration, and still does after it — this migration does not attempt to claw that back (would need a column-aware trigger, out of scope). What 0028 adds is a **second, additive** policy, `visits_review_write`, granting `top_mgmt`/`admin` an explicit UPDATE independent of `visits_write`. Practical enforcement that a `branch_rep` cannot use the review workflow comes from the server action role guard in `src/app/(app)/hearing-tests/actions.ts` (`requireReviewerProfile()`, checked at the top of both `reviewHearingTest` and `linkVisitSale`) — belt-and-braces, same pattern already used for the `admin_corrections` RPCs. Branch create/edit of visits (0012's `visits_write`) is completely untouched.
+
+## 2. Build
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- No generated `Database` type exists in this repo (same caveat as every prior phase) — every new `.from("visits")` column reference (`is_hearing_test`, `reviewed_at`, `reviewed_by`, `review_notes`, `resulted_in_sale_id`) and the two new server actions' `.update(...)` calls are loosely typed; a typo'd column name only surfaces at runtime.
+- `src/app/(app)/hearing-tests/actions.ts`'s `requireReviewerProfile()` returns a discriminated union (`{ profile: Profile; denied?: undefined } | { profile?: undefined; denied: HearingTestActionState }`) and is deliberately **not destructured** at the call sites (`const guard = ...; if (guard.denied) return guard.denied; const profile = guard.profile;`) — destructuring both fields up front would have widened `profile` back to `Profile | undefined` after the guard check, since TS discriminated-union narrowing doesn't survive destructuring into separate bindings. If this pattern gets refactored, keep that in mind.
+- `src/components/customers/visit-list.tsx` had `VISIT_FILES_BUCKET`, `SIGNED_URL_TTL_SECONDS`, `resolveAttachmentLinks`, and a new `AttachmentLink` type promoted from private to `export` — `src/app/(app)/hearing-tests/page.tsx` imports `resolveAttachmentLinks` directly rather than duplicating the signed-URL logic, per the "same helper as visit-list" instruction. `VisitList`'s own rendering behavior (customer detail page) is unchanged aside from the new hearing-test/reviewed badges.
+- `src/app/(app)/hearing-tests/page.tsx` resolves branch filtering as a two-step lookup (customers matching `branch_created_id`, then `visits.customer_id in (...)`) rather than a single query, since `visits` has no `branch_id` of its own — a patient's "branch" for this feature is their customer record's `branch_created_id`. Follows the existing "Map joins not embeds" convention with several small lookups (customers, profiles for reviewer names, sales for OR numbers, and a per-customer sales list for the in-dialog linker) rather than nested `.select()` embeds.
+
+## 3. What was built (Item C)
+
+- **Visit form** (`src/components/customers/visit-form.tsx`): new "This is a hearing test" checkbox (`is_hearing_test`, alongside the existing "Purchase made during this visit" checkbox and the existing file-attachment input — no changes to upload mechanics). Persisted via `logVisitSchema` (`src/lib/validators/customer.ts`) and `logVisit` (`src/app/(app)/customers/actions.ts`).
+- **Review actions** (`src/app/(app)/hearing-tests/actions.ts`, types in `src/lib/validators/hearing-test.ts`):
+  - `reviewHearingTest(prev, formData)` — top_mgmt/admin only, sets `reviewed_at = now()`, `reviewed_by = <current user>`, `review_notes = <textarea>` on the visit (scoped with `.eq("is_hearing_test", true)` as a defensive guard).
+  - `linkVisitSale(prev, formData)` — top_mgmt/admin only, looks up the visit's `customer_id`, and if a `sale_id` is supplied, verifies that sale's `customer_id` matches before writing `resulted_in_sale_id` (an empty selection unlinks by writing `null` — a small bonus beyond the spec, not a hard requirement).
+- **New page** `src/app/(app)/hearing-tests/page.tsx` (+ `loading.tsx`): role-gated (`top_mgmt`/`admin`, else `redirect("/")`), cross-branch, 50/page, filters via `?branch=&from=&to=&reviewed=&sale=` (query parsing in `src/app/(app)/hearing-tests/query.ts`). Table columns: patient, branch, visit date, purchased-during-visit badge, linked sale (OR no.) or —, reviewed status (badge + reviewer name + date, or "Unreviewed").
+- **Review UI: dialog, not inline-expand.** `src/components/hearing-tests/hearing-tests-table.tsx` — each row has a "Review" button opening a `Dialog` with the test-file link(s) (signed URLs, 3600s TTL, via the promoted `resolveAttachmentLinks` helper), a review-notes textarea + "Mark reviewed" button, and a sale-linker `Select` (populated from that customer's sales, fetched in bulk on the page rather than per-row) + "Save sale link" button. Chose a dialog over an expandable row because the review payload (file links + notes + a full sale picker) is bulkier than the corrections-log's before/after JSON that justified an inline expand there.
+- **Nav** (`src/components/nav.tsx`): new "Clinical" section (placed between Customers and Transfers) with a single "Hearing tests" link, roles `admin`/`top_mgmt`.
+- **Customer detail visit list** (`src/components/customers/visit-list.tsx`): hearing-test visits now show a "Hearing test" badge plus "Reviewed \<date\>" (success) or "Awaiting review" (warning) next to it. `VisitRowData`'s new fields (`is_hearing_test?`, `reviewed_at?`) are optional so this doesn't break any other caller of `VisitList`.
+
+## 4. Manual checklist
+
+- **Branch logs a hearing-test visit:** as `branch_rep`, open a customer, log a visit with a visit date, tick "This is a hearing test," attach a file (image or PDF), leave "Purchase made during this visit" unticked, submit. Confirm the new visit appears in the customer's visit history with a "Hearing test" badge and an "Awaiting review" badge (no "Purchase made" badge). Try again with "Purchase made during this visit" ticked too — confirm both badges plus "Purchase made" appear.
+- **top_mgmt reviews:** log in as `top_mgmt` (or `admin`). Sidebar shows "Hearing tests" under a new "Clinical" section. Open `/hearing-tests` — the visit just logged appears (may need to widen the default From/To date filters — they default to the last 3 months) with the branch name, visit date, "—" for purchased (or the badge if ticked), "—" for linked sale, and an "Unreviewed" badge.
+- **Filter unreviewed:** set the Reviewed filter to "Unreviewed," click Apply — confirm only unreviewed rows remain and the URL carries `?reviewed=unreviewed`. Do the same for Branch and Sale filters, and a From/To date range that excludes the visit — confirm it disappears, then widen the range back.
+- **Open and review:** click "Review" on the row — dialog opens showing the uploaded file as a clickable link (opens the actual file in a new tab via a signed URL), a review-notes textarea, and a sale-linker. Type a note, click "Mark reviewed" — toast confirms, dialog stays open, row now shows a "Reviewed" badge with your name and today's date once you close/refresh.
+- **Link the sale:** if this customer has any recorded sales, the same dialog's "Link to sale" dropdown lists them (date + OR no.); pick one, click "Save sale link" — toast confirms, the table row now shows "OR \<number\>" (or "OR —" if that sale has no OR no.) in the Linked sale column. If the customer has zero sales, the dialog shows "This customer has no recorded sales yet." instead of the dropdown.
+- **branch_rep has no Hearing tests link and is redirected:** log in as `branch_rep` (or `technical`). No "Clinical" section / "Hearing tests" link in the sidebar. Navigating directly to `/hearing-tests` redirects to `/`.
+- **branch_rep cannot write review fields (RLS):** with a `branch_rep` session, open devtools and call `supabase.from('visits').update({ reviewed_at: new Date().toISOString(), reviewed_by: '<own id>' }).eq('id', '<any visit id>')` directly. This is expected to **succeed** at the RLS layer (0012's pre-existing `visits_write` already permits it — a known, documented pre-existing gap, not introduced by this change) — the real, verified gate is that `branch_rep` cannot reach this codepath through the app at all (no link, redirected page) and the two server actions (`reviewHearingTest`, `linkVisitSale`) both reject a non-top_mgmt/non-admin caller with "Not authorized." before ever issuing the update, even if someone crafts a direct form POST to them. Confirm this explicitly: call `reviewHearingTest`/`linkVisitSale` — via the app there's no way to reach them as `branch_rep` (no UI renders them), so this is really a code-read check of `requireReviewerProfile()` in `src/app/(app)/hearing-tests/actions.ts` rather than something clickable.
+- **admin path:** repeat the "top_mgmt reviews" and "link the sale" checks logged in as `admin` — same access, same result.
+
+## 5. Known gaps / things to double check locally
+
+- No generated `Database` type exists in this repo — same caveat as every prior phase.
+- As detailed in the RLS section above, `visits_write` (0012) already lets `branch_rep` write any column on any visit at the Postgres level, including the new `review_*` columns — this is a pre-existing gap in the schema (visits have no `branch_id` to scope RLS against at all), not something introduced or fixed by this session. Locking it down properly would need a `before update` trigger comparing `OLD`/`NEW` on the review columns and checking `auth_role()`, which was judged out of scope for this feature (the plan's own "simplest safe approach" explicitly accepted this and relies on the action-level guard instead).
+- `resulted_in_sale_id` linking supports unlinking (picking "No sale linked" writes `null`) — this is a small addition beyond the plan's literal ask, kept because it was nearly free once the linking form existed and avoids a one-way-only relationship being awkward to fix from a mis-click.
+- The hearing-tests page resolves signed URLs sequentially per visit per attachment path (same pattern as `visit-list.tsx`'s `resolveAttachmentLinks`) — fine at the current data volume; if a single page of 50 hearing-test visits each carries several large attachments, this could add noticeable page-load latency. Worth revisiting (e.g., batching or lazy-loading per-dialog-open) if that becomes a real pattern.
+- The "purchased during visit" boolean and the new `resulted_in_sale_id` FK are intentionally two independent signals (per the plan) — a visit can have `purchased_during_visit = true` with no linked sale (reviewer hasn't gotten to it yet) or a linked sale with the boolean left unticked (branch forgot to check it) — the UI doesn't attempt to reconcile or auto-sync these two fields.
