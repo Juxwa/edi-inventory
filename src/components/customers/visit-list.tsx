@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
+import { SaleLinkForm, type SaleLinkOption } from "@/components/shared/sale-link-form";
+import { AttachmentViewer, type ViewableAttachment } from "@/components/shared/attachment-viewer";
+import { linkSaleToVisit } from "@/app/(app)/customers/actions";
 
 export const VISIT_FILES_BUCKET = "visit-files";
 export const SIGNED_URL_TTL_SECONDS = 3600;
@@ -13,7 +16,22 @@ export type VisitRowData = {
   attachment_paths: string[] | null;
   is_hearing_test?: boolean;
   reviewed_at?: string | null;
+  resulted_in_sale_id?: string | null;
 };
+
+export type LinkedSaleInfo = {
+  sale_date: string;
+  or_no: string | null;
+  hasStock: boolean;
+  hasService: boolean;
+};
+
+function saleTypeBadgeLabel(info: LinkedSaleInfo): string {
+  if (info.hasStock && info.hasService) return "Item + Service";
+  if (info.hasStock) return "Item";
+  if (info.hasService) return "Service";
+  return "Sale";
+}
 
 export type AttachmentLink = { path: string; url: string | null; name: string };
 
@@ -50,9 +68,13 @@ async function VisitAttachments({ paths }: { paths: string[] | null }) {
   const links = await resolveAttachmentLinks(paths);
   if (links.length === 0) return null;
 
+  const viewable: ViewableAttachment[] = links
+    .filter((link: AttachmentLink): link is AttachmentLink & { url: string } => link.url !== null)
+    .map((link: AttachmentLink & { url: string }) => ({ name: link.name, url: link.url }));
+
   return (
-    <div className="flex flex-wrap gap-2 pt-1">
-      {links.map((link: { path: string; url: string | null; name: string }) =>
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      {links.map((link: AttachmentLink) =>
         link.url ? (
           <a
             key={link.path}
@@ -69,11 +91,20 @@ async function VisitAttachments({ paths }: { paths: string[] | null }) {
           </span>
         ),
       )}
+      <AttachmentViewer attachments={viewable} />
     </div>
   );
 }
 
-export function VisitList({ visits }: { visits: VisitRowData[] }) {
+export function VisitList({
+  visits,
+  saleOptions,
+  linkedSales,
+}: {
+  visits: VisitRowData[];
+  saleOptions: SaleLinkOption[];
+  linkedSales: Map<string, LinkedSaleInfo>;
+}) {
   if (visits.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -84,35 +115,58 @@ export function VisitList({ visits }: { visits: VisitRowData[] }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {visits.map((visit: VisitRowData) => (
-        <div key={visit.id} className="rounded-lg border border-border p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{formatDate(visit.visit_date)}</span>
-              {visit.purpose ? <Badge variant="outline">{visit.purpose}</Badge> : null}
-              {visit.purchased_during_visit ? (
-                <Badge variant="success">Purchase made</Badge>
-              ) : null}
-              {visit.is_hearing_test ? (
-                <>
-                  <Badge variant="secondary">Hearing test</Badge>
-                  {visit.reviewed_at ? (
-                    <Badge variant="success">
-                      Reviewed {formatDate(visit.reviewed_at ?? null)}
-                    </Badge>
-                  ) : (
-                    <Badge variant="warning">Awaiting review</Badge>
-                  )}
-                </>
-              ) : null}
+      {visits.map((visit: VisitRowData) => {
+        const linkedSale = visit.resulted_in_sale_id
+          ? linkedSales.get(visit.resulted_in_sale_id)
+          : undefined;
+
+        return (
+          <div key={visit.id} className="rounded-lg border border-border p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{formatDate(visit.visit_date)}</span>
+                {visit.purpose ? <Badge variant="outline">{visit.purpose}</Badge> : null}
+                {visit.purchased_during_visit ? (
+                  <Badge variant="success">Purchase made</Badge>
+                ) : null}
+                {linkedSale ? (
+                  <Badge variant="secondary">{saleTypeBadgeLabel(linkedSale)}</Badge>
+                ) : null}
+                {visit.is_hearing_test ? (
+                  <>
+                    <Badge variant="secondary">Hearing test</Badge>
+                    {visit.reviewed_at ? (
+                      <Badge variant="success">
+                        Reviewed {formatDate(visit.reviewed_at ?? null)}
+                      </Badge>
+                    ) : (
+                      <Badge variant="warning">Awaiting review</Badge>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            </div>
+            {visit.remarks ? (
+              <p className="mt-2 text-sm text-muted-foreground">{visit.remarks}</p>
+            ) : null}
+            <VisitAttachments paths={visit.attachment_paths} />
+            {linkedSale ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                Linked sale: {formatDate(linkedSale.sale_date)} —{" "}
+                {linkedSale.or_no ?? "No OR no."}
+              </p>
+            ) : null}
+            <div className="mt-3">
+              <SaleLinkForm
+                visitId={visit.id}
+                currentSaleId={visit.resulted_in_sale_id ?? null}
+                saleOptions={saleOptions}
+                action={linkSaleToVisit}
+              />
             </div>
           </div>
-          {visit.remarks ? (
-            <p className="mt-2 text-sm text-muted-foreground">{visit.remarks}</p>
-          ) : null}
-          <VisitAttachments paths={visit.attachment_paths} />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

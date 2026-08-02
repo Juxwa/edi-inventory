@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
+import { clearMustChangePassword } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +32,10 @@ export default function ResetPasswordPage() {
       setError("Password must be at least 8 characters.");
       return;
     }
+    if (password === "edi2026") {
+      setError("Choose a password different from your temporary password.");
+      return;
+    }
     if (password !== confirm) {
       setError("Passwords do not match.");
       return;
@@ -46,6 +51,7 @@ export default function ResetPasswordPage() {
       setPending(false);
       return;
     }
+    await clearMustChangePassword();
     router.push("/");
     router.refresh();
   }

@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const STORAGE_KEY = "edi:welcome-tour:v1";
+const STORAGE_KEY = "edi:welcome-tour:v2";
 
 const ROLE_BLURB: Record<Profile["role"], string> = {
   admin:

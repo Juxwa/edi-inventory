@@ -10,6 +10,10 @@ import {
   type CustomerActionState,
   type VisitActionState,
 } from "@/lib/validators/customer";
+import {
+  linkVisitSaleSchema,
+  type HearingTestActionState,
+} from "@/lib/validators/hearing-test";
 
 const VISIT_FILES_BUCKET = "visit-files";
 
@@ -117,6 +121,11 @@ export async function logVisit(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
+  const profile = await getProfile();
+  if (!profile) {
+    return { ok: false, error: "Not signed in." };
+  }
+
   const supabase = await createClient();
 
   const { data: visit, error: visitError } = await supabase
@@ -128,6 +137,8 @@ export async function logVisit(
       purchased_during_visit: parsed.data.purchased_during_visit,
       is_hearing_test: parsed.data.is_hearing_test,
       remarks: parsed.data.remarks,
+      branch_id: profile.branch_id,
+      logged_by: profile.id,
     })
     .select("id")
     .single();
@@ -178,5 +189,67 @@ export async function logVisit(
     };
   }
 
+  return { ok: true };
+}
+
+// Generic sale-link, open to any active profile (branch_rep included) —
+// unlike hearing-tests/actions.ts's linkVisitSale, this has no
+// is_hearing_test gate and no reviewer-role restriction. Keeps
+// resulted_in_sale_id and purchased_during_visit in sync: linking sets
+// both, unlinking (sale_id null) clears both.
+export async function linkSaleToVisit(
+  _prevState: HearingTestActionState,
+  formData: FormData,
+): Promise<HearingTestActionState> {
+  const profile = await getProfile();
+  if (!profile || !profile.is_active) {
+    return { ok: false, error: "Not authorized." };
+  }
+
+  const parsed = linkVisitSaleSchema.safeParse({
+    visit_id: formData.get("visit_id"),
+    sale_id: formData.get("sale_id"),
+  });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const supabase = await createClient();
+
+  const { data: visit, error: visitError } = await supabase
+    .from("visits")
+    .select("id, customer_id")
+    .eq("id", parsed.data.visit_id)
+    .single();
+  if (visitError || !visit) {
+    return { ok: false, error: "Visit not found." };
+  }
+
+  // Validate the sale belongs to the same customer as the visit before
+  // linking — never trust the picked sale_id blindly.
+  if (parsed.data.sale_id) {
+    const { data: sale, error: saleError } = await supabase
+      .from("sales")
+      .select("id, customer_id")
+      .eq("id", parsed.data.sale_id)
+      .single();
+    if (saleError || !sale || sale.customer_id !== visit.customer_id) {
+      return { ok: false, error: "That sale does not belong to this customer." };
+    }
+  }
+
+  const { error } = await supabase
+    .from("visits")
+    .update({
+      resulted_in_sale_id: parsed.data.sale_id,
+      purchased_during_visit: parsed.data.sale_id !== null,
+    })
+    .eq("id", parsed.data.visit_id);
+
+  if (error) {
+    return { ok: false, error: "Could not link sale." };
+  }
+
+  revalidatePath(`/customers/${visit.customer_id}`);
   return { ok: true };
 }

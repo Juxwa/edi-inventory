@@ -35,8 +35,9 @@ export const GUIDES: Guide[] = [
       {
         heading: "Signing in",
         steps: [
-          "Open the app and enter the email address and password your administrator set up for you.",
-          "If you forgot your password, use the “Forgot password” link on the login page and follow the email instructions.",
+          "Open the app and sign in with the email address your administrator gave you and the temporary password you were issued.",
+          "First sign-in always lands on Set your password — choose your own password (at least 8 characters, and different from the temporary one) before you can go anywhere else in the app.",
+          "From then on, sign in with your email and the password you chose. If you forget it, use the “Forgot password” link on the login page and follow the email instructions.",
           "If your account was deactivated or you cannot sign in, contact your administrator — accounts are managed under Admin → Users.",
         ],
       },
@@ -62,7 +63,7 @@ export const GUIDES: Guide[] = [
         tips: [
           "Branch reps: check your stock under Inventory → Stock, then try recording a sale (Sales → Record sale).",
           "Need stock from head office? Create a stock request (Transfers → Stock requests).",
-          "Admins: start with Inventory → Stock intake to receive new stock, and Admin → Users to onboard your team.",
+          "Admins: start with Inventory → Add New Inventory to receive new stock, and Admin → Users to onboard your team.",
           "Every page has a matching guide — click the question-mark icon in the top bar at any time.",
         ],
       },
@@ -85,21 +86,21 @@ export const GUIDES: Guide[] = [
       {
         heading: "Receiving new stock (admin)",
         steps: [
-          "Go to Inventory → Stock intake.",
+          "Go to Inventory → Add New Inventory.",
           "Pick the product, supplier, and destination branch.",
           "Enter quantity, unit cost, and the supplier invoice number and date.",
           "For serialized products (e.g. hearing aids), enter each serial number — one stock record is created per serial.",
           "Submit. The stock immediately appears in the destination branch’s inventory.",
         ],
         tips: [
-          "If the product does not exist yet, add it first under Inventory → Products.",
+          "If the product does not exist yet, add it first under Inventory → Manage Products.",
         ],
       },
       {
         heading: "Products and suppliers (admin / top management)",
         body: [
-          "Inventory → Products is the master catalog: name, code, category, supplier, SRP, and whether the product is serial-tracked. Archive products you no longer sell instead of deleting them.",
-          "Inventory → Suppliers stores vendor contact details and payment terms, and is referenced by products and stock intake.",
+          "Inventory → Manage Products is the master catalog: name, code, category, supplier, SRP, and whether the product is serial-tracked. Archive products you no longer sell instead of deleting them.",
+          "Inventory → Manage Suppliers stores vendor contact details and payment terms, and is referenced by products and stock intake.",
         ],
       },
     ],
@@ -159,10 +160,22 @@ export const GUIDES: Guide[] = [
         steps: [
           "Open the customer’s page.",
           "Add a visit with the date, the purpose (consultation, fitting, follow-up, etc.), and any remarks.",
-          "Mark whether a purchase was made during the visit.",
+          "Mark whether a purchase was made during the visit, and attach photos or PDFs if you have any.",
+          "Check “This is a hearing test” and attach the test file if the visit was a hearing test — it then appears in the cross-branch hearing-test queue for review. See the “Hearing-test reviews” guide.",
         ],
         tips: [
           "Logging visits consistently gives head office an accurate picture of branch foot traffic and follow-up needs.",
+        ],
+      },
+      {
+        heading: "Linking a visit to a sale",
+        body: [
+          "Open the customer’s page and find the visit in Visit history. Use the “Link to sale” control on the visit to choose the sale that resulted from it.",
+          "Linking automatically marks the visit as a purchase, and a badge on the visit shows whether the linked sale was an Item, Service, or Item + Service sale.",
+          "Choose “No sale linked” to unlink a visit from a sale — this clears the purchase flag again.",
+        ],
+        tips: [
+          "Any role that can open the customer’s page, including branch representatives, can link or unlink a visit’s sale.",
         ],
       },
     ],
@@ -354,8 +367,9 @@ export const GUIDES: Guide[] = [
   },
   {
     slug: "admin-users",
-    title: "Managing users (admin)",
-    summary: "Create accounts, assign roles and branches, and deactivate users.",
+    title: "Managing users and admin tools (admin)",
+    summary:
+      "Create accounts, assign roles and branches, deactivate users, review corrections, and clean up duplicate serials.",
     roles: ["admin"],
     sections: [
       {
@@ -380,6 +394,82 @@ export const GUIDES: Guide[] = [
           "Technical is for repair staff — they see the repair and earmold queues across branches, but not sales or inventory.",
         ],
       },
+      {
+        heading: "Corrections log",
+        body: [
+          "Admin → Corrections log records every void, reversal, and serial correction made anywhere in the app, each with the reason given and a before/after snapshot of the record.",
+          "Filter by entity (sale, stock intake, stock, transfer, repair, earmold, serial) and date range. Click Details on a row to see the full before/after data.",
+        ],
+        tips: [
+          "Use this log to answer “who changed this and why” — it’s the audit trail for every correction, not just a list of current values.",
+        ],
+      },
+      {
+        heading: "Duplicate serials",
+        body: [
+          "Admin → Duplicate serials lists stock rows that share the same serial number (case-insensitive), mostly left over from imported legacy data — new stock intakes reject duplicate serials automatically.",
+          "Review each group and correct or remove the extra rows directly in Inventory → Stock; this page is a finder, not an editor.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "hearing-tests",
+    title: "Hearing-test reviews (admin / top management)",
+    summary:
+      "Review hearing-test visits across every branch, check test files, and mark them reviewed.",
+    roles: ["admin", "top_mgmt"],
+    sections: [
+      {
+        heading: "How a visit becomes a hearing test",
+        body: [
+          "When a branch logs a customer visit, they can check “This is a hearing test” and attach the test file (see the “Customers and visits” guide). That visit then appears here, on Hearing tests, regardless of branch.",
+        ],
+      },
+      {
+        heading: "Reviewing a hearing test",
+        steps: [
+          "Go to Hearing tests. The list shows every hearing-test visit across all branches, with the patient, branch, visit date, whether a purchase was made, whether a sale is linked, and review status.",
+          "Click Review on a visit to open its detail, and open the test file link(s) to check the results.",
+          "Add review notes and click Mark reviewed.",
+          "If the visit resulted in a sale, use the Link to sale control in the same dialog to attach it — this also marks the visit as a purchase. See the “Customers and visits” guide for how linking works.",
+        ],
+        tips: [
+          "Unreviewed visits show an “Unreviewed” badge so nothing slips through; reviewed visits show who reviewed them and when.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "analytics",
+    title: "Analytics (admin / top management)",
+    summary:
+      "Cross-branch sales performance: KPIs, best sellers, branch ranking, and trends.",
+    roles: ["admin", "top_mgmt"],
+    sections: [
+      {
+        heading: "Reading the dashboard",
+        body: [
+          "Go to Analytics. Filter by date range, branch, and product category at the top, then click Apply — Reset clears every filter back to the default range.",
+          "The KPI row shows total revenue, total units, gross margin, branches with sales, and average sale value, each with a percentage change against the equivalent prior period.",
+          "The trend chart plots monthly revenue over the selected range so seasonal patterns and growth are easy to spot.",
+        ],
+      },
+      {
+        heading: "Best sellers, services, and branches",
+        body: [
+          "Best-selling SKUs ranks products by units or revenue — click a column header to switch. Top services ranks services the same way. Branch performance compares every branch, including whether each branch moved up or down versus the prior period.",
+        ],
+        tips: [
+          "Every table has its own Export CSV button, which downloads exactly the filtered data you’re looking at.",
+        ],
+      },
+      {
+        heading: "Who can see this",
+        body: [
+          "Analytics is read-only and visible to admin and top management only — it does not appear in the sidebar for branch representatives or technical staff.",
+        ],
+      },
     ],
   },
 ];
@@ -402,11 +492,13 @@ const PATH_GUIDES: [prefix: string, slug: string][] = [
   ["/suppliers", "inventory"],
   ["/sales", "sales"],
   ["/customers", "customers"],
+  ["/hearing-tests", "hearing-tests"],
   ["/transfers", "transfers"],
   ["/requests", "stock-requests"],
   ["/repairs", "repairs"],
   ["/earmolds", "earmolds"],
   ["/reports", "reports"],
+  ["/analytics", "analytics"],
   ["/admin", "admin-users"],
 ];
 

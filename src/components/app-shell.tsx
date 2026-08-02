@@ -9,10 +9,18 @@ import type { Profile } from "@/lib/supabase/profile";
 type AppShellProps = {
   profile: Profile;
   branchName: string | null;
+  // Pinned between the header and the scrolling main area, so it stays put on
+  // every page. Only the backend admin's view-as banner uses it.
+  banner?: React.ReactNode;
   children: React.ReactNode;
 };
 
-export function AppShell({ profile, branchName, children }: AppShellProps) {
+export function AppShell({
+  profile,
+  branchName,
+  banner,
+  children,
+}: AppShellProps) {
   return (
     <div className="flex min-h-screen">
       <aside className="flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground print:hidden">
@@ -36,6 +44,7 @@ export function AppShell({ profile, branchName, children }: AppShellProps) {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Header profile={profile} branchName={branchName} />
+        {banner}
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
 

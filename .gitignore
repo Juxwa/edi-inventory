@@ -45,3 +45,4 @@ next-env.d.ts
 data/exports/
 data/import-reports/
 node_modules.*
+data/users.csv

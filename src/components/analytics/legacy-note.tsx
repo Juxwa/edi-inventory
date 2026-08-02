@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "edi:analytics-legacy-note:v1";
+const STORAGE_KEY = "edi:analytics-legacy-note:v2";
 
 // Dismissible, one-time-per-browser data caveat — see welcome-tour.tsx for
 // the same localStorage pattern. Rendered hidden until after mount so we
@@ -35,8 +35,8 @@ export function LegacyDataNote() {
   return (
     <div className="flex items-start justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning-foreground">
       <p>
-        Historical figures may understate revenue — some legacy records were
-        imported without amounts (13,562 zero-price legacy sale lines).
+        Historical figures may understate revenue — some legacy sale lines
+        imported from the previous system have no recorded price.
       </p>
       <Button
         variant="ghost"

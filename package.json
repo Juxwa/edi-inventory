@@ -9,7 +9,11 @@
     "lint": "eslint",
     "test": "vitest run",
     "db:push": "supabase db push -p \"$SUPABASE_DB_PASSWORD\"",
-    "import": "tsx --env-file=.env.local scripts/import/run.ts"
+    "import": "tsx --env-file=.env.local scripts/import/run.ts",
+    "migrate-visit-files": "tsx --env-file=.env.local scripts/import/migrate-visit-files.ts",
+    "bulk-users": "tsx --env-file=.env.local scripts/admin/bulk-users.ts",
+    "generate-users-csv": "tsx --env-file=.env.local scripts/admin/generate-users-csv.ts",
+    "clear-visit-files": "tsx --env-file=.env.local scripts/admin/clear-visit-files.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3",

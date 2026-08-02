@@ -14,6 +14,30 @@ function firstIssueMessage(issues: { message: string }[]): string {
   return issues[0]?.message ?? "Invalid input.";
 }
 
+// Best-effort audit trail for auth-side admin actions (invite/update/ban),
+// which live in Supabase Auth rather than a triggered table so the
+// activity_log triggers from migration 0029 never see them. Failure here
+// must never break the underlying action.
+async function logAdminUserAction(
+  admin: ReturnType<typeof createAdminClient>,
+  op: "INSERT" | "UPDATE",
+  affectedUserId: string,
+  newData: Record<string, unknown>,
+): Promise<void> {
+  const profile = await getProfile();
+  try {
+    await admin.from("activity_log").insert({
+      table_name: "auth_users",
+      op,
+      row_id: affectedUserId,
+      actor_id: profile?.id ?? null,
+      new_data: newData,
+    });
+  } catch {
+    // Non-fatal: the user-management action already succeeded.
+  }
+}
+
 // Every action re-verifies admin server-side before touching the
 // service-role client — never trust the page-level gate alone.
 async function requireAdmin(): Promise<UserActionState | null> {
@@ -65,6 +89,13 @@ export async function inviteUser(
     return { ok: false, error: profileError.message };
   }
 
+  await logAdminUserAction(admin, "INSERT", data.user.id, {
+    email: parsed.data.email,
+    name: parsed.data.name,
+    role: parsed.data.role,
+    branch_id: parsed.data.branch_id,
+  });
+
   revalidatePath("/admin/users");
   return { ok: true };
 }
@@ -99,6 +130,12 @@ export async function updateUserProfile(
   if (error) {
     return { ok: false, error: error.message };
   }
+
+  await logAdminUserAction(admin, "UPDATE", parsed.data.user_id, {
+    name: parsed.data.name,
+    role: parsed.data.role,
+    branch_id: parsed.data.branch_id,
+  });
 
   revalidatePath("/admin/users");
   return { ok: true };
@@ -144,6 +181,10 @@ export async function setUserActive(
   if (error) {
     return { ok: false, error: error.message };
   }
+
+  await logAdminUserAction(admin, "UPDATE", parsed.data.user_id, {
+    is_active: parsed.data.active,
+  });
 
   revalidatePath("/admin/users");
   return { ok: true };

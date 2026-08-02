@@ -7,13 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -35,6 +28,8 @@ import {
   initialHearingTestState,
   type HearingTestActionState,
 } from "@/lib/validators/hearing-test";
+import { SaleLinkForm } from "@/components/shared/sale-link-form";
+import { AttachmentViewer, type ViewableAttachment } from "@/components/shared/attachment-viewer";
 
 export type AttachmentLinkData = { path: string; url: string | null; name: string };
 
@@ -98,67 +93,11 @@ function ReviewForm({ visit }: { visit: HearingTestVisitRow }) {
   );
 }
 
-function SaleLinkForm({ visit }: { visit: HearingTestVisitRow }) {
-  const router = useRouter();
-  const [saleId, setSaleId] = useState<string>(visit.resulted_in_sale_id ?? "");
-  const [state, formAction, pending] = useActionState<HearingTestActionState, FormData>(
-    linkVisitSale,
-    initialHearingTestState,
-  );
-
-  useEffect(() => {
-    if (state.ok) {
-      toast.success("Sale link updated.");
-      router.refresh();
-    } else if (state.error) {
-      toast.error(state.error);
-    }
-  }, [state, router]);
-
-  if (visit.customer_sales.length === 0) {
-    return (
-      <div className="grid gap-1">
-        <p className="text-sm font-medium">Link to sale</p>
-        <p className="text-sm text-muted-foreground">
-          This customer has no recorded sales yet.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <form action={formAction} className="grid gap-2">
-      <input type="hidden" name="visit_id" value={visit.id} />
-      <input type="hidden" name="sale_id" value={saleId} />
-      <label className="text-sm font-medium">Link to sale</label>
-      <Select
-        value={saleId || "none"}
-        onValueChange={(value: string) => setSaleId(value === "none" ? "" : value)}
-        disabled={pending}
-      >
-        <SelectTrigger className="w-full">
-          <SelectValue placeholder="No sale linked" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="none">No sale linked</SelectItem>
-          {visit.customer_sales.map((sale: CustomerSaleOption) => (
-            <SelectItem key={sale.id} value={sale.id}>
-              {formatDate(sale.sale_date)} — {sale.or_no ?? "No OR no."}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <div>
-        <Button type="submit" size="sm" variant="secondary" disabled={pending}>
-          {pending ? "Saving..." : "Save sale link"}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
 function HearingTestRowDialog({ visit }: { visit: HearingTestVisitRow }) {
   const [open, setOpen] = useState(false);
+  const viewable: ViewableAttachment[] = visit.attachments
+    .filter((link: AttachmentLinkData): link is AttachmentLinkData & { url: string } => link.url !== null)
+    .map((link: AttachmentLinkData & { url: string }) => ({ name: link.name, url: link.url }));
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -179,7 +118,7 @@ function HearingTestRowDialog({ visit }: { visit: HearingTestVisitRow }) {
             {visit.attachments.length === 0 ? (
               <p className="text-sm text-muted-foreground">No file uploaded.</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {visit.attachments.map((link: AttachmentLinkData) =>
                   link.url ? (
                     <a
@@ -197,12 +136,18 @@ function HearingTestRowDialog({ visit }: { visit: HearingTestVisitRow }) {
                     </span>
                   ),
                 )}
+                <AttachmentViewer attachments={viewable} />
               </div>
             )}
           </div>
 
           <ReviewForm visit={visit} />
-          <SaleLinkForm visit={visit} />
+          <SaleLinkForm
+            visitId={visit.id}
+            currentSaleId={visit.resulted_in_sale_id}
+            saleOptions={visit.customer_sales}
+            action={linkVisitSale}
+          />
         </div>
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => setOpen(false)}>

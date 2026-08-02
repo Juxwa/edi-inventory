@@ -13,7 +13,12 @@ import {
 } from "@/components/ui/table";
 import { CustomerInfoCard } from "@/components/customers/customer-info-card";
 import { VisitForm } from "@/components/customers/visit-form";
-import { VisitList, type VisitRowData } from "@/components/customers/visit-list";
+import {
+  VisitList,
+  type VisitRowData,
+  type LinkedSaleInfo,
+} from "@/components/customers/visit-list";
+import type { SaleLinkOption } from "@/components/shared/sale-link-form";
 import type { CustomerRecord } from "@/components/customers/customer-dialog";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +40,7 @@ type LineRow = {
   sale_id: string;
   quantity: number;
   unit_price: number;
+  line_type: "stock" | "service";
 };
 
 function formatCurrency(value: number): string {
@@ -85,7 +91,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
     supabase
       .from("visits")
       .select(
-        "id, visit_date, purpose, purchased_during_visit, remarks, attachment_paths, is_hearing_test, reviewed_at",
+        "id, visit_date, purpose, purchased_during_visit, remarks, attachment_paths, is_hearing_test, reviewed_at, resulted_in_sale_id",
       )
       .eq("customer_id", id)
       .order("visit_date", { ascending: false }),
@@ -94,19 +100,66 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
   const sales: SaleRow[] = (salesResult.data as SaleRow[] | null) ?? [];
   const visits: VisitRowData[] = (visitsResult.data as VisitRowData[] | null) ?? [];
 
+  // Union of the (limited) purchases list and every sale a visit links to —
+  // a linked sale can fall outside PURCHASES_LIMIT for a long-history
+  // customer, so it needs its own lookup rather than relying on `sales`.
   const saleIds = sales.map((sale: SaleRow) => sale.id);
+  const linkedSaleIds = Array.from(
+    new Set(
+      visits
+        .map((visit: VisitRowData) => visit.resulted_in_sale_id)
+        .filter((saleId): saleId is string => Boolean(saleId)),
+    ),
+  );
+  const missingSaleIds = linkedSaleIds.filter((saleId: string) => !saleIds.includes(saleId));
+
   let lineTotalsBySaleId = new Map<string, number>();
-  if (saleIds.length > 0) {
+  const lineTypesBySaleId = new Map<string, { hasStock: boolean; hasService: boolean }>();
+  const allSaleIds = [...saleIds, ...missingSaleIds];
+  if (allSaleIds.length > 0) {
     const { data: lineRows } = await supabase
       .from("sale_line_items")
-      .select("sale_id, quantity, unit_price")
-      .in("sale_id", saleIds);
+      .select("sale_id, quantity, unit_price, line_type")
+      .in("sale_id", allSaleIds);
     const lines: LineRow[] = (lineRows as LineRow[] | null) ?? [];
-    lineTotalsBySaleId = new Map();
     for (const line of lines) {
-      const existing = lineTotalsBySaleId.get(line.sale_id) ?? 0;
-      lineTotalsBySaleId.set(line.sale_id, existing + line.quantity * line.unit_price);
+      const existingTotal = lineTotalsBySaleId.get(line.sale_id) ?? 0;
+      lineTotalsBySaleId.set(line.sale_id, existingTotal + line.quantity * line.unit_price);
+
+      const existingTypes = lineTypesBySaleId.get(line.sale_id) ?? {
+        hasStock: false,
+        hasService: false,
+      };
+      if (line.line_type === "stock") existingTypes.hasStock = true;
+      if (line.line_type === "service") existingTypes.hasService = true;
+      lineTypesBySaleId.set(line.sale_id, existingTypes);
     }
+  }
+
+  let missingSales: SaleRow[] = [];
+  if (missingSaleIds.length > 0) {
+    const { data: missingSalesData } = await supabase
+      .from("sales")
+      .select("id, sale_date, or_no, discount")
+      .in("id", missingSaleIds);
+    missingSales = (missingSalesData as SaleRow[] | null) ?? [];
+  }
+
+  const saleOptions: SaleLinkOption[] = [...sales, ...missingSales].map((sale: SaleRow) => ({
+    id: sale.id,
+    sale_date: sale.sale_date,
+    or_no: sale.or_no,
+  }));
+
+  const linkedSales = new Map<string, LinkedSaleInfo>();
+  for (const sale of [...sales, ...missingSales]) {
+    const types = lineTypesBySaleId.get(sale.id) ?? { hasStock: false, hasService: false };
+    linkedSales.set(sale.id, {
+      sale_date: sale.sale_date,
+      or_no: sale.or_no,
+      hasStock: types.hasStock,
+      hasService: types.hasService,
+    });
   }
 
   return (
@@ -169,7 +222,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           <CardTitle>Visit history</CardTitle>
         </CardHeader>
         <CardContent>
-          <VisitList visits={visits} />
+          <VisitList visits={visits} saleOptions={saleOptions} linkedSales={linkedSales} />
         </CardContent>
       </Card>
     </div>
