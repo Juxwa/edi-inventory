@@ -94,7 +94,7 @@ export default async function EarmoldDetailPage({
   const branchName = (branchResult.data as { name: string } | null)?.name;
   const requesterName = (requesterResult.data as { name: string } | null)?.name;
   const isVoided = earmold.voided_at !== null;
-  const canManage = !isVoided && (profile.role === "admin" || profile.role === "technical");
+  const canManage = !isVoided && profile.role === "technical";
   const isAdmin = profile.role === "admin";
   const voidActorId =
     (voidCorrectionResult.data as { actor_id: string | null } | null)?.actor_id ?? null;
@@ -121,9 +121,13 @@ export default async function EarmoldDetailPage({
             {branchName ? ` · ${branchName}` : ""}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           {canManage ? (
             <EarmoldStatusButton earmoldId={earmold.id} status={earmold.status} />
+          ) : isAdmin && !isVoided ? (
+            <p className="text-sm text-muted-foreground">
+              Updates are made by the Technical team.
+            </p>
           ) : null}
           {isAdmin && !isVoided ? (
             <VoidDialog

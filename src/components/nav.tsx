@@ -33,7 +33,7 @@ const NAV: NavSection[] = [
       {
         href: "/inventory",
         label: "Stock",
-        roles: ["admin", "branch_rep", "top_mgmt"],
+        roles: ["admin", "branch_rep"],
       },
       {
         href: "/inventory/intake",
@@ -43,12 +43,12 @@ const NAV: NavSection[] = [
       {
         href: "/products",
         label: "Manage Products",
-        roles: ["admin", "top_mgmt"],
+        roles: ["admin"],
       },
       {
         href: "/suppliers",
         label: "Manage Suppliers",
-        roles: ["admin", "top_mgmt"],
+        roles: ["admin"],
       },
     ],
   },
@@ -63,7 +63,7 @@ const NAV: NavSection[] = [
       {
         href: "/sales",
         label: "Sales history",
-        roles: ["admin", "branch_rep", "top_mgmt"],
+        roles: ["admin", "branch_rep"],
       },
     ],
   },
@@ -93,12 +93,12 @@ const NAV: NavSection[] = [
       {
         href: "/transfers",
         label: "Transfers",
-        roles: ["admin", "branch_rep", "top_mgmt"],
+        roles: ["admin", "branch_rep"],
       },
       {
         href: "/requests",
         label: "Stock requests",
-        roles: ["admin", "branch_rep", "top_mgmt"],
+        roles: ["admin", "branch_rep"],
       },
     ],
   },

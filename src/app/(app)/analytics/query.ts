@@ -333,6 +333,178 @@ export function monthlyTrend(
   );
 }
 
+export type GrowthDriverRow = {
+  product_id: string;
+  product_name: string;
+  category: string;
+  current_revenue: number;
+  previous_revenue: number;
+  delta: number;
+  delta_pct: number | null;
+};
+
+// Top revenue risers vs. the prior equal-length period. Reuses the SkuAgg
+// maps already computed for the current and previous period (see
+// aggregateSkus) rather than a new view or query.
+export function computeGrowthDrivers(
+  currentSkus: SkuAgg[],
+  previousSkus: SkuAgg[],
+  topN = 10,
+): GrowthDriverRow[] {
+  const currentByProduct = new Map(currentSkus.map((s: SkuAgg) => [s.product_id, s]));
+  const previousByProduct = new Map(previousSkus.map((s: SkuAgg) => [s.product_id, s]));
+  const ids = new Set([...currentByProduct.keys(), ...previousByProduct.keys()]);
+
+  const rows: GrowthDriverRow[] = [];
+  for (const id of ids) {
+    const cur = currentByProduct.get(id);
+    const prev = previousByProduct.get(id);
+    const current_revenue = cur?.revenue ?? 0;
+    const previous_revenue = prev?.revenue ?? 0;
+    const delta = current_revenue - previous_revenue;
+    rows.push({
+      product_id: id,
+      product_name: cur?.product_name ?? prev?.product_name ?? "Unknown product",
+      category: cur?.category ?? prev?.category ?? "Uncategorized",
+      current_revenue,
+      previous_revenue,
+      delta,
+      delta_pct: previous_revenue === 0 ? null : (delta / previous_revenue) * 100,
+    });
+  }
+  return rows.sort((a: GrowthDriverRow, b: GrowthDriverRow) => b.delta - a.delta).slice(0, topN);
+}
+
+export type CustomerSalesRow = {
+  sale_id: string;
+  customer_id: string;
+  customer_name: string | null;
+  branch_id: string | null;
+  branch_name: string | null;
+  sale_date: string;
+  net_sales: number;
+};
+
+export async function fetchCustomerSales(
+  supabase: Supabase,
+  filters: AnalyticsFilters,
+): Promise<CustomerSalesRow[]> {
+  let query = supabase
+    .from("analytics_sales_by_customer")
+    .select("sale_id, customer_id, customer_name, branch_id, branch_name, sale_date, net_sales")
+    .gte("sale_date", filters.from)
+    .lte("sale_date", filters.to);
+  if (filters.branch) query = query.eq("branch_id", filters.branch);
+  const { data } = await query;
+  return (data as CustomerSalesRow[] | null) ?? [];
+}
+
+// All-time (unbounded) equivalent of fetchCustomerSales, for the VIP table's
+// all-time value column. Same view, wide date bounds instead of a second
+// query path — cheap at this data volume, same pattern the page already
+// uses for the previous-period comparison queries.
+export async function fetchCustomerSalesAllTime(
+  supabase: Supabase,
+  filters: Pick<AnalyticsFilters, "branch">,
+): Promise<CustomerSalesRow[]> {
+  return fetchCustomerSales(supabase, {
+    from: "1900-01-01",
+    to: "2999-12-31",
+    branch: filters.branch,
+    category: "",
+  });
+}
+
+export type CustomerAgg = {
+  customer_id: string;
+  customer_name: string;
+  branch_id: string | null;
+  branch_name: string;
+  total_value: number;
+  sale_count: number;
+  last_purchase_date: string;
+};
+
+// Aggregates per-sale rows to one row per customer. branch shown is the
+// branch of that customer's most recent sale in the row set (a customer can
+// buy from more than one branch; there's no single "their branch" field).
+export function aggregateCustomers(rows: CustomerSalesRow[]): CustomerAgg[] {
+  const map = new Map<string, CustomerAgg>();
+  for (const row of rows) {
+    const existing = map.get(row.customer_id);
+    if (existing) {
+      existing.total_value += Number(row.net_sales);
+      existing.sale_count += 1;
+      if (row.sale_date > existing.last_purchase_date) {
+        existing.last_purchase_date = row.sale_date;
+        existing.branch_id = row.branch_id;
+        existing.branch_name = row.branch_name ?? "Unknown branch";
+      }
+    } else {
+      map.set(row.customer_id, {
+        customer_id: row.customer_id,
+        customer_name: row.customer_name ?? "Unknown customer",
+        branch_id: row.branch_id,
+        branch_name: row.branch_name ?? "Unknown branch",
+        total_value: Number(row.net_sales),
+        sale_count: 1,
+        last_purchase_date: row.sale_date,
+      });
+    }
+  }
+  return Array.from(map.values()).sort(
+    (a: CustomerAgg, b: CustomerAgg) => b.total_value - a.total_value,
+  );
+}
+
+export type RepairsByProductRow = {
+  product_id: string;
+  product_name: string | null;
+  category: string | null;
+  month: string;
+  repair_count: number;
+};
+
+export async function fetchRepairsByProduct(
+  supabase: Supabase,
+  filters: AnalyticsFilters,
+): Promise<RepairsByProductRow[]> {
+  const query = supabase
+    .from("analytics_repairs_by_product")
+    .select("product_id, product_name, category, month, repair_count")
+    .gte("month", filters.from)
+    .lte("month", filters.to);
+  const { data } = await query;
+  return (data as RepairsByProductRow[] | null) ?? [];
+}
+
+export type RepairsByProductAgg = {
+  product_id: string;
+  product_name: string;
+  category: string;
+  repair_count: number;
+};
+
+export function aggregateRepairsByProduct(rows: RepairsByProductRow[]): RepairsByProductAgg[] {
+  const map = new Map<string, RepairsByProductAgg>();
+  for (const row of rows) {
+    const existing = map.get(row.product_id);
+    if (existing) {
+      existing.repair_count += Number(row.repair_count);
+    } else {
+      map.set(row.product_id, {
+        product_id: row.product_id,
+        product_name: row.product_name ?? "Unknown product",
+        category: row.category ?? "Uncategorized",
+        repair_count: Number(row.repair_count),
+      });
+    }
+  }
+  return Array.from(map.values()).sort(
+    (a: RepairsByProductAgg, b: RepairsByProductAgg) => b.repair_count - a.repair_count,
+  );
+}
+
 export type TrendSeriesPoint = { month: string } & Record<string, string | number>;
 export type TrendSeries = {
   points: TrendSeriesPoint[];

@@ -198,7 +198,7 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
 
   const serial = repair.manual_serial ?? line?.serial_snapshot ?? "—";
   const isVoided = repair.voided_at !== null;
-  const canManage = !isVoided && (profile.role === "admin" || profile.role === "technical");
+  const canManage = !isVoided && profile.role === "technical";
   const isAdmin = profile.role === "admin";
   const voidedByName = voidActorId ? (profileNameById.get(voidActorId) ?? null) : null;
 
@@ -344,6 +344,10 @@ export default async function RepairDetailPage({ params }: RepairDetailPageProps
               <div className="border-t border-border pt-4">
                 <EventForm repairId={repair.id} />
               </div>
+            ) : isAdmin && !isVoided ? (
+              <p className="border-t border-border pt-4 text-sm text-muted-foreground">
+                Updates are made by the Technical team.
+              </p>
             ) : null}
           </CardContent>
         </Card>

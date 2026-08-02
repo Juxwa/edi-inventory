@@ -19,6 +19,9 @@ import { ServiceTable } from "@/components/analytics/service-table";
 import { BranchTable } from "@/components/analytics/branch-table";
 import { TrendChart } from "@/components/analytics/trend-chart";
 import { LegacyDataNote } from "@/components/analytics/legacy-note";
+import { VipCustomerTable } from "@/components/analytics/vip-customer-table";
+import { GrowthDriverTable } from "@/components/analytics/growth-driver-table";
+import { RepairsByProductTable } from "@/components/analytics/repairs-by-product-table";
 import { formatCurrency } from "@/lib/format";
 import {
   parseAnalyticsFilters,
@@ -26,11 +29,17 @@ import {
   fetchProductSales,
   fetchServiceSales,
   fetchSaleCount,
+  fetchCustomerSales,
+  fetchCustomerSalesAllTime,
+  fetchRepairsByProduct,
   aggregateSkus,
   sortSkus,
   aggregateServices,
   aggregateBranches,
   rankByBranch,
+  aggregateCustomers,
+  aggregateRepairsByProduct,
+  computeGrowthDrivers,
   computeTotals,
   monthlyTrend,
   buildTrendSeries,
@@ -83,6 +92,9 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     prevProductRows,
     prevServiceRows,
     prevSaleCount,
+    customerRows,
+    customerRowsAllTime,
+    repairRows,
   ] = await Promise.all([
     supabase.from("branches").select("id, name").order("name"),
     supabase.from("product_categories").select("id, name").order("name"),
@@ -92,6 +104,9 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     fetchProductSales(supabase, prevFilters),
     fetchServiceSales(supabase, prevFilters),
     fetchSaleCount(supabase, prevFilters),
+    fetchCustomerSales(supabase, filters),
+    fetchCustomerSalesAllTime(supabase, filters),
+    fetchRepairsByProduct(supabase, filters),
   ]);
 
   const branches: { id: string; name: string }[] = branchesResult.data ?? [];
@@ -131,12 +146,20 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     },
   ];
 
-  const skus = sortSkus(aggregateSkus(productRows), sort).slice(0, 20);
+  const allSkus = aggregateSkus(productRows);
+  const skus = sortSkus(allSkus, sort).slice(0, 20);
   const services = aggregateServices(serviceRows);
   const branchAgg = aggregateBranches(productRows, serviceRows);
   const prevBranchAgg = aggregateBranches(prevProductRows, prevServiceRows);
   const prevRankByBranch = rankByBranch(prevBranchAgg);
   const trendSeries = buildTrendSeries(monthlyTrend(productRows, serviceRows));
+
+  const vipCustomers = aggregateCustomers(customerRows).slice(0, 20);
+  const allTimeByCustomer = new Map(
+    aggregateCustomers(customerRowsAllTime).map((c) => [c.customer_id, c.total_value]),
+  );
+  const growthDrivers = computeGrowthDrivers(allSkus, aggregateSkus(prevProductRows));
+  const repairsByProduct = aggregateRepairsByProduct(repairRows);
 
   function buildHref(nextSort: "units" | "revenue"): string {
     const next = new URLSearchParams();
@@ -272,6 +295,45 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
           </Button>
         </div>
         <BranchTable rows={branchAgg} previousRankByBranch={prevRankByBranch} />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">VIP customers</h2>
+          <Button asChild variant="outline" size="sm">
+            <a href={`/analytics/export/customers?${exportParams.toString()}`}>
+              <DownloadIcon className="size-4" />
+              Export CSV
+            </a>
+          </Button>
+        </div>
+        <VipCustomerTable rows={vipCustomers} allTimeByCustomer={allTimeByCustomer} />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Growth drivers</h2>
+          <Button asChild variant="outline" size="sm">
+            <a href={`/analytics/export/growth?${exportParams.toString()}`}>
+              <DownloadIcon className="size-4" />
+              Export CSV
+            </a>
+          </Button>
+        </div>
+        <GrowthDriverTable rows={growthDrivers} />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Repairs by product</h2>
+          <Button asChild variant="outline" size="sm">
+            <a href={`/analytics/export/repairs?${exportParams.toString()}`}>
+              <DownloadIcon className="size-4" />
+              Export CSV
+            </a>
+          </Button>
+        </div>
+        <RepairsByProductTable rows={repairsByProduct} />
       </div>
     </div>
   );
