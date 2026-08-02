@@ -13,6 +13,7 @@
     "migrate-visit-files": "tsx --env-file=.env.local scripts/import/migrate-visit-files.ts",
     "bulk-users": "tsx --env-file=.env.local scripts/admin/bulk-users.ts",
     "generate-users-csv": "tsx --env-file=.env.local scripts/admin/generate-users-csv.ts",
+    "reset-user": "tsx --env-file=.env.local scripts/admin/reset-user.ts",
     "clear-visit-files": "tsx --env-file=.env.local scripts/admin/clear-visit-files.ts"
   },
   "dependencies": {

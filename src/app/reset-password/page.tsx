@@ -1,10 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { createClient } from "@/lib/supabase/client";
-import { clearMustChangePassword } from "./actions";
+import { changePasswordAndClearFlag } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +17,6 @@ import {
 // Doubles as invite acceptance: invite and recovery email links both land
 // here with a session already established by /auth/confirm.
 export default function ResetPasswordPage() {
-  const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,19 +38,22 @@ export default function ResetPasswordPage() {
       return;
     }
     setPending(true);
-    const supabase = createClient();
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-    if (updateError) {
-      setError(
-        updateError.message ||
-          "Could not set the password. The link may have expired — request a new one.",
-      );
+    try {
+      // On success the action redirects server-side (rotated session travels as
+      // fresh Set-Cookie on the redirect response) and this component unmounts —
+      // so a returned value here always means failure. Leaving `pending` set on
+      // the success path keeps the button disabled through the navigation.
+      const result = await changePasswordAndClearFlag(password);
+      if (result && !result.ok) {
+        setError(result.error);
+        setPending(false);
+      }
+    } catch {
+      // Any thrown/network error must still release the button so it never
+      // stays stuck on "Saving..." forever.
+      setError("Something went wrong setting your password. Please try again.");
       setPending(false);
-      return;
     }
-    await clearMustChangePassword();
-    router.push("/");
-    router.refresh();
   }
 
   return (

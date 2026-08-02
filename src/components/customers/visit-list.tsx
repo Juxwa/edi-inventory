@@ -156,14 +156,23 @@ export function VisitList({
                 {linkedSale.or_no ?? "No OR no."}
               </p>
             ) : null}
-            <div className="mt-3">
-              <SaleLinkForm
-                visitId={visit.id}
-                currentSaleId={visit.resulted_in_sale_id ?? null}
-                saleOptions={saleOptions}
-                action={linkSaleToVisit}
-              />
-            </div>
+            {visit.is_hearing_test ? (
+              // Hearing-test visits are linked/reviewed from the reviewer-only
+              // /hearing-tests workflow — show the outcome read-only here
+              // rather than a picker that could clobber a reviewed link.
+              !linkedSale && !visit.purchased_during_visit ? (
+                <p className="mt-3 text-sm text-muted-foreground">No sale linked yet.</p>
+              ) : null
+            ) : (
+              <div className="mt-3">
+                <SaleLinkForm
+                  visitId={visit.id}
+                  currentSaleId={visit.resulted_in_sale_id ?? null}
+                  saleOptions={saleOptions}
+                  action={linkSaleToVisit}
+                />
+              </div>
+            )}
           </div>
         );
       })}

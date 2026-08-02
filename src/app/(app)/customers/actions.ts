@@ -192,11 +192,14 @@ export async function logVisit(
   return { ok: true };
 }
 
-// Generic sale-link, open to any active profile (branch_rep included) —
-// unlike hearing-tests/actions.ts's linkVisitSale, this has no
-// is_hearing_test gate and no reviewer-role restriction. Keeps
-// resulted_in_sale_id and purchased_during_visit in sync: linking sets
-// both, unlinking (sale_id null) clears both.
+// Generic sale-link, open to any active profile (branch_rep included) for
+// NON-hearing-test visits only — hearing-test visits are the reviewers'
+// domain (see hearing-tests/actions.ts's linkVisitSale) and are excluded
+// via the is_hearing_test filter below, regardless of what the UI renders.
+// Sync with purchased_during_visit is one-way: linking a sale sets it true,
+// but unlinking (sale_id null) never clears it — the flag also gets set at
+// visit-logging time and via legacy Bubble import, and clearing it on
+// unlink would silently erase that history.
 export async function linkSaleToVisit(
   _prevState: HearingTestActionState,
   formData: FormData,
@@ -218,11 +221,14 @@ export async function linkSaleToVisit(
 
   const { data: visit, error: visitError } = await supabase
     .from("visits")
-    .select("id, customer_id")
+    .select("id, customer_id, is_hearing_test")
     .eq("id", parsed.data.visit_id)
     .single();
   if (visitError || !visit) {
     return { ok: false, error: "Visit not found." };
+  }
+  if (visit.is_hearing_test) {
+    return { ok: false, error: "Hearing-test visits are linked from the Hearing Tests page." };
   }
 
   // Validate the sale belongs to the same customer as the visit before
@@ -238,16 +244,26 @@ export async function linkSaleToVisit(
     }
   }
 
-  const { error } = await supabase
+  const patch: { resulted_in_sale_id: string | null; purchased_during_visit?: boolean } = {
+    resulted_in_sale_id: parsed.data.sale_id,
+  };
+  if (parsed.data.sale_id !== null) patch.purchased_during_visit = true;
+
+  // is_hearing_test filter is the real gate: it's re-checked here (not just
+  // above) so this UPDATE can never touch a hearing-test visit even under a
+  // race, no matter what the calling UI allows.
+  const { data: updated, error } = await supabase
     .from("visits")
-    .update({
-      resulted_in_sale_id: parsed.data.sale_id,
-      purchased_during_visit: parsed.data.sale_id !== null,
-    })
-    .eq("id", parsed.data.visit_id);
+    .update(patch)
+    .eq("id", parsed.data.visit_id)
+    .eq("is_hearing_test", false)
+    .select("id");
 
   if (error) {
     return { ok: false, error: "Could not link sale." };
+  }
+  if (!updated || updated.length === 0) {
+    return { ok: false, error: "Hearing-test visits are linked from the Hearing Tests page." };
   }
 
   revalidatePath(`/customers/${visit.customer_id}`);
