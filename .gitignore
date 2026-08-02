@@ -46,3 +46,6 @@ data/exports/
 data/import-reports/
 node_modules.*
 data/users.csv
+
+# local DB backups (contain PII, never commit)
+backups/

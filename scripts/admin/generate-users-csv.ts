@@ -13,6 +13,7 @@ type Role = 'admin' | 'branch_rep' | 'top_mgmt' | 'technical';
 // 1. Specific email override.
 const ROLE_BY_EMAIL: Record<string, Role> = {
   'evp@eardiagnostics.com.ph': 'top_mgmt',
+  'president_eardiagnostics@eardiagnostics.com.ph': 'top_mgmt',
 };
 // 2. AssociatedBranch override (applies regardless of the Role column).
 const TECHNICAL_BRANCH = 'Technical/Repairs';
