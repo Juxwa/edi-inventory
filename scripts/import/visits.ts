@@ -64,6 +64,9 @@ export function mapVisit(
       purpose: clean(row['Purpose of Visit']),
       purchased_during_visit: toBool(row['PurchaseDuringVisit']),
       remarks: clean(row['Remarks']),
+      // Legacy visits carrying a test file are test records — surface them
+      // on /hearing-tests for top-management review.
+      is_hearing_test: files.length > 0,
       branch_id: null,
       logged_by: null,
     },
