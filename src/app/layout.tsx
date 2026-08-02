@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 export const metadata: Metadata = {
   title: "EDI Inventory",
@@ -17,6 +18,7 @@ export default function RootLayout({
       <body>
         {children}
         <Toaster position="top-right" />
+        <SpeedInsights />
       </body>
     </html>
   );
