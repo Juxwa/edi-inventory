@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/supabase/profile";
 import {
   createTransferSchema,
   addLineSchema,
@@ -43,6 +44,20 @@ export async function createTransfer(
 
   if (parsed.data.from_branch_id === parsed.data.to_branch_id) {
     return { ok: false, error: "From and to branches must be different." };
+  }
+
+  const profile = await getProfile();
+  if (!profile) {
+    return { ok: false, error: "Not signed in." };
+  }
+
+  // branch_rep/technical are branch-locked in the UI (fixed label, no
+  // Select) — re-check here rather than trusting the submitted value, since
+  // a tampered hidden field would otherwise only surface as a raw RLS
+  // failure (transfers_all's with-check only exempts role 'admin').
+  const isBranchLocked = profile.role === "branch_rep" || profile.role === "technical";
+  if (isBranchLocked && parsed.data.from_branch_id !== profile.branch_id) {
+    return { ok: false, error: "You can only create transfers from your own branch." };
   }
 
   const supabase = await createClient();

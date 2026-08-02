@@ -15,8 +15,14 @@ export default async function NewTransferPage() {
   const { data } = await supabase.from("branches").select("id, name").order("name");
   const branches: { id: string; name: string }[] = data ?? [];
 
+  // branch_rep is pinned to their own branch as the origin — never a
+  // Select. technical is redirected above and can't reach this line, so
+  // profile.role is narrowed to admin/branch_rep/top_mgmt here.
   const lockedFromBranchId =
     profile.role === "branch_rep" ? profile.branch_id : null;
+  // admin/top_mgmt keep a free choice of origin branch, but the Select
+  // starts on their own branch (HQ for admin) instead of blank.
+  const defaultFromBranchId = lockedFromBranchId ? null : profile.branch_id;
 
   return (
     <div className="flex flex-col gap-6">
@@ -32,6 +38,7 @@ export default async function NewTransferPage() {
         <NewTransferForm
           branches={branches}
           lockedFromBranchId={lockedFromBranchId}
+          defaultFromBranchId={defaultFromBranchId}
         />
       </div>
     </div>

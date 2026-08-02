@@ -25,11 +25,13 @@ export type BranchOption = {
 type NewTransferFormProps = {
   branches: BranchOption[];
   lockedFromBranchId: string | null;
+  defaultFromBranchId: string | null;
 };
 
 export function NewTransferForm({
   branches,
   lockedFromBranchId,
+  defaultFromBranchId,
 }: NewTransferFormProps) {
   const [state, formAction, pending] = useActionState<
     TransferActionState,
@@ -62,7 +64,11 @@ export function NewTransferForm({
             </p>
           </>
         ) : (
-          <Select name="from_branch_id" disabled={pending}>
+          <Select
+            name="from_branch_id"
+            disabled={pending}
+            defaultValue={defaultFromBranchId ?? undefined}
+          >
             <SelectTrigger id="from_branch_id">
               <SelectValue placeholder="Select branch" />
             </SelectTrigger>
