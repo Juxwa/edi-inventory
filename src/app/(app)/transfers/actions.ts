@@ -46,7 +46,21 @@ export async function createTransfer(
   }
 
   const supabase = await createClient();
-  const code = generateTransferCode();
+
+  const { data: branches, error: branchesError } = await supabase
+    .from("branches")
+    .select("id, code")
+    .in("id", [parsed.data.from_branch_id, parsed.data.to_branch_id]);
+
+  if (branchesError || !branches) {
+    return { ok: false, error: "Could not create transfer." };
+  }
+
+  const fromCode =
+    branches.find((b) => b.id === parsed.data.from_branch_id)?.code ?? "";
+  const toCode =
+    branches.find((b) => b.id === parsed.data.to_branch_id)?.code ?? "";
+  const code = generateTransferCode(fromCode, toCode);
 
   const { data, error } = await supabase
     .from("transfers")

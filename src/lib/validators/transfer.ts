@@ -88,13 +88,23 @@ export const deleteDraftSchema = z.object({
 });
 export type DeleteDraftInput = z.infer<typeof deleteDraftSchema>;
 
-export function generateTransferCode(): string {
+// Branch-coded transfer reference, e.g. TR-HQ-CEB-260802-4F7. Falls back to
+// "XX" for a missing/blank branch code so a lookup gap can't throw here.
+// transfers.code has no unique constraint (idx_transfers_code is a plain
+// index — see 0001_reference.sql), so a 3-char suffix needs no retry loop.
+export function generateTransferCode(fromCode: string, toCode: string): string {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(2);
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const dd = String(now.getDate()).padStart(2, "0");
-  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `TR-${yy}${mm}${dd}-${random}`;
+  const hexChars = "0123456789ABCDEF";
+  let random = "";
+  for (let i = 0; i < 3; i++) {
+    random += hexChars[Math.floor(Math.random() * 16)];
+  }
+  const from = fromCode.trim().toUpperCase() || "XX";
+  const to = toCode.trim().toUpperCase() || "XX";
+  return `TR-${from}-${to}-${yy}${mm}${dd}-${random}`;
 }
 
 export const TRANSFER_STATUSES = [
