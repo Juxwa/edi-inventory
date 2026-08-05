@@ -190,21 +190,6 @@ export default async function TransferDetailPage({
     );
   }
 
-  // TEMPORARY DEBUG PROBE — remove after transfer-name investigation.
-  console.log(
-    "[transfer-debug]",
-    JSON.stringify({
-      code: transferRow.code,
-      viewerRole: profile.role,
-      viewerBranch: profile.branch_id,
-      rawCount: rawLines.length,
-      firstLine: rawLines[0] ?? null,
-      stockVisibleHits: productNameByStockId.size,
-      fallbackIds: fallbackProductIds,
-      fallbackResolved: productNameById.size,
-    }),
-  );
-
   const lines: TransferLineRowData[] = rawLines.map((line: RawLineRow) => ({
     id: line.id,
     product_name:
