@@ -20,6 +20,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { createClient } from "@/lib/supabase/client";
 import { recordSale } from "@/app/(app)/sales/actions";
 import { initialSaleState, type SaleActionState } from "@/lib/validators/sale";
 
@@ -77,36 +78,58 @@ function todayIsoDate(): string {
 
 function CustomerPicker({
   customers,
-  selectedId,
+  selected,
   onSelect,
   useNewCustomer,
   onToggleNewCustomer,
   disabled,
 }: {
   customers: SaleCustomerOption[];
-  selectedId: string | null;
+  selected: SaleCustomerOption | null;
   onSelect: (customer: SaleCustomerOption | null) => void;
   useNewCustomer: boolean;
   onToggleNewCustomer: (value: boolean) => void;
   disabled: boolean;
 }) {
+  const supabase = useMemo(() => createClient(), []);
   const [query, setQuery] = useState("");
+  // null = no active search; the server-side results otherwise. The customers
+  // prop is only a starter list (recent customers) — the full directory is
+  // searched server-side, since it is far too large to ship to the client.
+  const [results, setResults] = useState<SaleCustomerOption[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
-  const filtered = useMemo(() => {
-    const trimmed = query.trim().toLowerCase();
-    if (trimmed.length === 0) return customers.slice(0, 50);
-    return customers
-      .filter((customer: SaleCustomerOption) => {
-        const name = customer.name.toLowerCase();
-        const mobile = customer.mobile_no?.toLowerCase() ?? "";
-        return name.includes(trimmed) || mobile.includes(trimmed);
-      })
-      .slice(0, 50);
-  }, [customers, query]);
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setResults(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      // PostgREST or() treats , ( ) as syntax; strip them from the term.
+      const term = trimmed.replace(/[,()]/g, " ").trim();
+      const { data } = await supabase
+        .from("customers")
+        .select("id, name, mobile_no")
+        .or(`name.ilike.%${term}%,mobile_no.ilike.%${term}%`)
+        .order("name")
+        .limit(50);
+      if (!cancelled) {
+        setResults((data as SaleCustomerOption[] | null) ?? []);
+        setSearching(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, supabase]);
 
-  const selected = customers.find(
-    (customer: SaleCustomerOption) => customer.id === selectedId,
-  );
+  const filtered = results ?? customers.slice(0, 50);
+  const selectedId = selected?.id ?? null;
 
   return (
     <div className="grid gap-3">
@@ -155,7 +178,7 @@ function CustomerPicker({
         <div className="grid gap-1.5">
           <Input
             id="customer-search"
-            placeholder="Type to filter by name or mobile"
+            placeholder="Search all customers by name or mobile"
             value={query}
             onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
               setQuery(event.target.value)
@@ -172,7 +195,7 @@ function CustomerPicker({
           <div className="max-h-48 overflow-y-auto rounded-md border border-border">
             {filtered.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">
-                No customers match.
+                {searching ? "Searching…" : "No customers match."}
               </p>
             ) : (
               <ul className="flex flex-col divide-y divide-border">
@@ -437,7 +460,7 @@ export function SaleForm({
 
       <CustomerPicker
         customers={customers}
-        selectedId={selectedCustomer?.id ?? null}
+        selected={selectedCustomer}
         onSelect={setSelectedCustomer}
         useNewCustomer={useNewCustomer}
         onToggleNewCustomer={(value: boolean) => {

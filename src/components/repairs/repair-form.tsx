@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { createClient } from "@/lib/supabase/client";
 import { intakeRepair } from "@/app/(app)/repairs/actions";
 import { initialRepairState, type RepairActionState } from "@/lib/validators/repair";
 
@@ -84,25 +85,59 @@ export function RepairForm({
       .slice(0, 50);
   }, [soldItems, itemQuery]);
 
-  const filteredCustomers = useMemo(() => {
-    const trimmed = customerQuery.trim().toLowerCase();
-    if (trimmed.length === 0) return customers.slice(0, 50);
-    return customers
-      .filter((customer: RepairCustomerOption) => {
-        const name = customer.name.toLowerCase();
-        const mobile = customer.mobile_no?.toLowerCase() ?? "";
-        return name.includes(trimmed) || mobile.includes(trimmed);
-      })
-      .slice(0, 50);
-  }, [customers, customerQuery]);
+  const supabase = useMemo(() => createClient(), []);
+  // null = no active search; otherwise server-side results. The customers
+  // prop is only a starter list — the full directory is searched server-side.
+  const [customerResults, setCustomerResults] =
+    useState<RepairCustomerOption[] | null>(null);
+  const [customerSearching, setCustomerSearching] = useState(false);
 
-  const selectedCustomer = customers.find(
-    (customer: RepairCustomerOption) => customer.id === selectedCustomerId,
-  );
+  useEffect(() => {
+    const trimmed = customerQuery.trim();
+    if (trimmed.length < 2) {
+      setCustomerResults(null);
+      setCustomerSearching(false);
+      return;
+    }
+    setCustomerSearching(true);
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      // PostgREST or() treats , ( ) as syntax; strip them from the term.
+      const term = trimmed.replace(/[,()]/g, " ").trim();
+      const { data } = await supabase
+        .from("customers")
+        .select("id, name, mobile_no")
+        .or(`name.ilike.%${term}%,mobile_no.ilike.%${term}%`)
+        .order("name")
+        .limit(50);
+      if (!cancelled) {
+        setCustomerResults((data as RepairCustomerOption[] | null) ?? []);
+        setCustomerSearching(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [customerQuery, supabase]);
+
+  const filteredCustomers = customerResults ?? customers.slice(0, 50);
+
+  // Tracked as an object (not looked up in the starter list) so a customer
+  // picked via search or carried over from a sold item still displays.
+  const [selectedCustomer, setSelectedCustomer] =
+    useState<RepairCustomerOption | null>(null);
 
   function handleSelectItem(item: SoldItemOption) {
     setSelectedItem(item);
-    if (item.customer_id) setSelectedCustomerId(item.customer_id);
+    if (item.customer_id) {
+      setSelectedCustomerId(item.customer_id);
+      setSelectedCustomer({
+        id: item.customer_id,
+        name: item.customer_name ?? "—",
+        mobile_no: item.customer_mobile,
+      });
+    }
     if (item.customer_mobile) setContactNo(item.customer_mobile);
   }
 
@@ -225,7 +260,7 @@ export function RepairForm({
           <Label>Customer (optional)</Label>
           <Input
             id="customer-search"
-            placeholder="Type to filter by name or mobile"
+            placeholder="Search all customers by name or mobile"
             value={customerQuery}
             onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
               setCustomerQuery(event.target.value)
@@ -244,7 +279,7 @@ export function RepairForm({
           <div className="max-h-48 overflow-y-auto rounded-md border border-border">
             {filteredCustomers.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">
-                No customers match.
+                {customerSearching ? "Searching…" : "No customers match."}
               </p>
             ) : (
               <ul className="flex flex-col divide-y divide-border">
@@ -254,6 +289,7 @@ export function RepairForm({
                       type="button"
                       onClick={() => {
                         setSelectedCustomerId(customer.id);
+                        setSelectedCustomer(customer);
                         if (customer.mobile_no) setContactNo(customer.mobile_no);
                       }}
                       className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground ${

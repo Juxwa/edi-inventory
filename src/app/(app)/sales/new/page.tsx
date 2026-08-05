@@ -10,7 +10,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const CUSTOMER_CAP = 2000;
+// Starter list only — the picker searches the full directory server-side.
+// Most recently added customers first: likeliest to be picked again soon.
+const CUSTOMER_CAP = 50;
 
 type NewSalePageProps = {
   searchParams: Promise<{ branch?: string }>;
@@ -47,7 +49,7 @@ export default async function NewSalePage({ searchParams }: NewSalePageProps) {
       supabase
         .from("customers")
         .select("id, name, mobile_no")
-        .order("name")
+        .order("created_at", { ascending: false })
         .limit(CUSTOMER_CAP),
       supabase.from("services").select("id, name").order("name"),
       activeBranchId

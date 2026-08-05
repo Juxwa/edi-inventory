@@ -10,7 +10,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const CUSTOMER_CAP = 2000;
+// Starter list only — the form searches the full directory server-side.
+const CUSTOMER_CAP = 50;
 // ponytail: newest 500 serialized sold lines preloaded for client filtering;
 // switch to server-side search if intake regularly needs older sales.
 const SOLD_ITEM_CAP = 500;
@@ -30,7 +31,7 @@ export default async function NewRepairPage() {
       supabase
         .from("customers")
         .select("id, name, mobile_no")
-        .order("name")
+        .order("created_at", { ascending: false })
         .limit(CUSTOMER_CAP),
       supabase
         .from("profiles")
@@ -92,8 +93,26 @@ export default async function NewRepairPage() {
       (row: ProductRow) => [row.id, row.name],
     ),
   );
+  // Sold-item customers are fetched by id — the starter list is far too small
+  // to cover whoever the recent sales belong to.
+  const soldCustomerIds = Array.from(
+    new Set(
+      ((salesResult.data as SaleRow[] | null) ?? [])
+        .map((row: SaleRow) => row.customer_id)
+        .filter((id: string | null): id is string => id !== null),
+    ),
+  );
+  const soldCustomersResult =
+    soldCustomerIds.length > 0
+      ? await supabase
+          .from("customers")
+          .select("id, name, mobile_no")
+          .in("id", soldCustomerIds)
+      : { data: [] as RepairCustomerOption[] };
   const customerById = new Map<string, RepairCustomerOption>(
-    customers.map((customer: RepairCustomerOption) => [customer.id, customer]),
+    ((soldCustomersResult.data as RepairCustomerOption[] | null) ?? []).map(
+      (customer: RepairCustomerOption) => [customer.id, customer],
+    ),
   );
 
   const soldItems: SoldItemOption[] = lines.map((line: LineRow) => {

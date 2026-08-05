@@ -145,6 +145,7 @@ export function mapSaleGroup(group: SaleGroup, ctx: SaleCtx): MapSaleGroupResult
         product_id: null,
         quantity: qty,
         unit_price,
+        serial_snapshot: null,
         warranty_expiry: null,
         after_sales_status,
       });
@@ -174,6 +175,7 @@ export function mapSaleGroup(group: SaleGroup, ctx: SaleCtx): MapSaleGroupResult
         product_id,
         quantity: qty,
         unit_price,
+        serial_snapshot: serial,
         warranty_expiry: parseBubbleDate(row['WarrantyExpiryDate']),
         after_sales_status,
       });

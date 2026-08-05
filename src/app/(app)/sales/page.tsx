@@ -12,7 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SalesTable, type SalesRowData } from "@/components/sales/sales-table";
+import {
+  SalesTable,
+  type SalesLineData,
+  type SalesRowData,
+} from "@/components/sales/sales-table";
 
 export const dynamic = "force-dynamic";
 
@@ -137,25 +141,71 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
   }
 
   const saleIds = rows.map((row: SaleQueryRow) => row.id);
-  let lineTotalsBySaleId = new Map<string, { count: number; gross: number }>();
+  type LineRow = {
+    sale_id: string;
+    line_type: "stock" | "service";
+    product_id: string | null;
+    service_id: string | null;
+    quantity: number;
+    unit_price: number;
+    serial_snapshot: string | null;
+    warranty_expiry: string | null;
+  };
+  let lines: LineRow[] = [];
   if (saleIds.length > 0) {
     const { data: lineRows } = await supabase
       .from("sale_line_items")
-      .select("sale_id, quantity, unit_price")
+      .select(
+        "sale_id, line_type, product_id, service_id, quantity, unit_price, serial_snapshot, warranty_expiry",
+      )
       .in("sale_id", saleIds);
-    type LineRow = { sale_id: string; quantity: number; unit_price: number };
-    const lines: LineRow[] = (lineRows as LineRow[] | null) ?? [];
-    lineTotalsBySaleId = new Map();
-    for (const line of lines) {
-      const existing = lineTotalsBySaleId.get(line.sale_id) ?? { count: 0, gross: 0 };
-      existing.count += 1;
-      existing.gross += line.quantity * line.unit_price;
-      lineTotalsBySaleId.set(line.sale_id, existing);
+    lines = (lineRows as LineRow[] | null) ?? [];
+  }
+
+  const productIds = lines
+    .map((line: LineRow) => line.product_id)
+    .filter((id: string | null): id is string => id !== null);
+  const serviceIds = lines
+    .map((line: LineRow) => line.service_id)
+    .filter((id: string | null): id is string => id !== null);
+
+  type NameRow = { id: string; name: string };
+  const [productsResult, servicesResult] = await Promise.all([
+    productIds.length > 0
+      ? supabase.from("products").select("id, name").in("id", productIds)
+      : Promise.resolve({ data: [] as NameRow[] }),
+    serviceIds.length > 0
+      ? supabase.from("services").select("id, name").in("id", serviceIds)
+      : Promise.resolve({ data: [] as NameRow[] }),
+  ]);
+  const productNameById = new Map<string, string>(
+    ((productsResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [row.id, row.name]),
+  );
+  const serviceNameById = new Map<string, string>(
+    ((servicesResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [row.id, row.name]),
+  );
+
+  function lineName(line: LineRow): string {
+    if (line.line_type === "service") {
+      return line.service_id ? (serviceNameById.get(line.service_id) ?? "—") : "—";
     }
+    return line.product_id ? (productNameById.get(line.product_id) ?? "—") : "—";
+  }
+
+  const lineTotalsBySaleId = new Map<string, { gross: number; lines: SalesLineData[] }>();
+  for (const line of lines) {
+    const existing = lineTotalsBySaleId.get(line.sale_id) ?? { gross: 0, lines: [] };
+    existing.gross += line.quantity * line.unit_price;
+    existing.lines.push({
+      name: lineName(line),
+      serial: line.serial_snapshot,
+      warranty_expiry: line.warranty_expiry,
+    });
+    lineTotalsBySaleId.set(line.sale_id, existing);
   }
 
   const sales: SalesRowData[] = rows.map((row: SaleQueryRow) => {
-    const totals = lineTotalsBySaleId.get(row.id) ?? { count: 0, gross: 0 };
+    const totals = lineTotalsBySaleId.get(row.id) ?? { gross: 0, lines: [] };
     const net = Math.max(0, totals.gross - (row.discount ?? 0));
     return {
       id: row.id,
@@ -165,7 +215,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
         ? (customerNameById.get(row.customer_id) ?? "—")
         : "Walk-in",
       branch_name: branchNameById.get(row.branch_id) ?? "—",
-      line_count: totals.count,
+      lines: totals.lines,
       net,
       is_paid: row.is_paid,
     };

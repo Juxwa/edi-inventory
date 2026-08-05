@@ -91,7 +91,15 @@ describe('repairs', () => {
       p_assigned_to: null, p_downpayment: null, p_initial_note: null,
     });
 
-    const inRepair = await rep.rpc('repair_add_event', {
+    // status advancement is technical-only since 0033: the rep's attempt is
+    // rejected by the repair_add_event guard, then a technical user advances
+    const repAttempt = await rep.rpc('repair_add_event', {
+      p_repair_id: repairId, p_status: 'in_repair', p_note: null, p_is_public: true,
+    });
+    expect(repAttempt.error).not.toBeNull();
+
+    const tech = await makeUser('repair-tech@test.local', 'technical', branchA);
+    const inRepair = await tech.rpc('repair_add_event', {
       p_repair_id: repairId, p_status: 'in_repair', p_note: null, p_is_public: true,
     });
     expect(inRepair.error).toBeNull();
@@ -100,7 +108,7 @@ describe('repairs', () => {
     expect(header!.status).toBe('in_progress');
     expect(header!.returned_to_customer_at).toBeNull();
 
-    const returned = await rep.rpc('repair_add_event', {
+    const returned = await tech.rpc('repair_add_event', {
       p_repair_id: repairId, p_status: 'returned', p_note: 'Picked up', p_is_public: true,
     });
     expect(returned.error).toBeNull();

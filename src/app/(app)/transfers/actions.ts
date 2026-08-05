@@ -127,7 +127,7 @@ export async function addLine(
 
   const { data: stockRow, error: stockError } = await supabase
     .from("stock_visible")
-    .select("id, branch_id, status, quantity, serial_number")
+    .select("id, branch_id, status, quantity, serial_number, product_id, is_repair_pool")
     .eq("id", parsed.data.stock_id)
     .single();
 
@@ -149,6 +149,10 @@ export async function addLine(
     .insert({
       transfer_id: parsed.data.transfer_id,
       stock_id: parsed.data.stock_id,
+      // product_id snapshot lets the receiving branch name the item: while
+      // in transit the stock row still belongs to the origin branch, so
+      // stock_visible hides it from the destination.
+      product_id: stockRow.product_id,
       quantity: stockRow.serial_number ? 1 : parsed.data.quantity,
       serial_snapshot: stockRow.serial_number,
     });

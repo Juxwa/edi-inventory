@@ -6,6 +6,7 @@ import { importServicePricing } from './service-pricing';
 import { importServices } from './services';
 import { importStock } from './stock';
 import { importTransfers } from './transfers';
+import { importTransferLineItems } from './transfer-line-items';
 import { importCustomers } from './customers';
 import { importSales } from './sales';
 import { importRepairs } from './repairs';
@@ -48,6 +49,10 @@ async function main() {
   await optional('services', 'export_All-Services', importServices);
   await importStock(file('export_All-Stocks'));
   await importTransfers(file('export_All-Transfer-Records'));
+  // Heuristic matcher (no transfer reference in the export); must run after
+  // transfers, products, and stock are in.
+  await optional('transfer line items', 'export_All-Transfer-Line-Items',
+    (f) => importTransferLineItems(f, file('export_All-Transfer-Records')));
   await optional('customers', 'export_All-Customers', importCustomers);
   await optional('sales', 'export_All-Sales', importSales);
   await optional('repairs', 'export_All-Repair-Requests', importRepairs);

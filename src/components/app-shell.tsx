@@ -45,7 +45,8 @@ export function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <Header profile={profile} branchName={branchName} />
         {banner}
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        {/* pb-24 keeps page content clear of the floating chat button */}
+        <main className="flex-1 overflow-y-auto p-6 pb-24 print:pb-0">{children}</main>
       </div>
 
       <ChatWidget

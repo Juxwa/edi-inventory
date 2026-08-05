@@ -45,14 +45,22 @@ describe('earmolds', () => {
       .select('id').eq('id', created!.id);
     expect(hidden).toEqual([]);
 
-    // advance pending -> processing with a stale from_status guard
-    const { data: advanced } = await repA.from('earmold_requests')
+    // status advancement is technical-only since 0033: the branch rep's
+    // update is a silent no-op under earmold_update RLS
+    const { data: repAdvance } = await repA.from('earmold_requests')
+      .update({ status: 'processing' }).eq('id', created!.id)
+      .eq('status', 'pending').select('id');
+    expect(repAdvance).toEqual([]);
+
+    // technical advances pending -> processing with a stale from_status guard
+    const tech = await makeUser('repair-tech@test.local', 'technical', branchA);
+    const { data: advanced } = await tech.from('earmold_requests')
       .update({ status: 'processing' }).eq('id', created!.id)
       .eq('status', 'pending').select('id');
     expect(advanced!.length).toBe(1);
 
     // stale advance (still claims pending) is a no-op
-    const { data: stale } = await repA.from('earmold_requests')
+    const { data: stale } = await tech.from('earmold_requests')
       .update({ status: 'served' }).eq('id', created!.id)
       .eq('status', 'pending').select('id');
     expect(stale).toEqual([]);

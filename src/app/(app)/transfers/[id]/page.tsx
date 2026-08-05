@@ -123,7 +123,7 @@ export default async function TransferDetailPage({
   const { data: lineRows } = await supabase
     .from("transfer_line_items")
     .select(
-      "id, quantity, serial_snapshot, received_confirmed, received_quantity, received_note, stock_id",
+      "id, quantity, serial_snapshot, received_confirmed, received_quantity, received_note, stock_id, product_id",
     )
     .eq("transfer_id", transferRow.id);
 
@@ -135,6 +135,7 @@ export default async function TransferDetailPage({
     received_quantity: number | null;
     received_note: string | null;
     stock_id: string | null;
+    product_id: string | null;
   };
   const rawLines: RawLineRow[] = (lineRows as RawLineRow[] | null) ?? [];
 
@@ -166,11 +167,35 @@ export default async function TransferDetailPage({
     );
   }
 
+  // product_id fallback covers lines without a stock link (legacy imports)
+  // AND lines whose stock the viewer cannot see — while in transit the stock
+  // row still belongs to the origin branch, so stock_visible hides it from
+  // the receiving branch.
+  const fallbackProductIds = rawLines
+    .filter(
+      (line: RawLineRow) =>
+        line.product_id &&
+        !(line.stock_id && productNameByStockId.has(line.stock_id)),
+    )
+    .map((line: RawLineRow) => line.product_id as string);
+  let productNameById = new Map<string, string>();
+  if (fallbackProductIds.length > 0) {
+    const { data: productRows } = await supabase
+      .from("products")
+      .select("id, name")
+      .in("id", fallbackProductIds);
+    type ProductRow = { id: string; name: string };
+    productNameById = new Map(
+      ((productRows as ProductRow[] | null) ?? []).map((row: ProductRow) => [row.id, row.name]),
+    );
+  }
+
   const lines: TransferLineRowData[] = rawLines.map((line: RawLineRow) => ({
     id: line.id,
-    product_name: line.stock_id
-      ? (productNameByStockId.get(line.stock_id) ?? "—")
-      : "—",
+    product_name:
+      (line.stock_id ? productNameByStockId.get(line.stock_id) : undefined) ??
+      (line.product_id ? productNameById.get(line.product_id) : undefined) ??
+      "—",
     serial_snapshot: line.serial_snapshot,
     quantity: line.quantity,
     received_confirmed: line.received_confirmed,
