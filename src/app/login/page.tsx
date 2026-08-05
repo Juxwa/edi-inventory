@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
+import { Suspense, useActionState } from "react";
+import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { signIn, type SignInState } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,17 @@ import {
 } from "@/components/ui/card";
 
 const initialState: SignInState = {};
+
+function UrlErrorNotice() {
+  const searchParams = useSearchParams();
+  const urlError = searchParams.get("error");
+  if (!urlError) return null;
+  return (
+    <p role="alert" className="mb-3 text-sm font-medium text-destructive">
+      {urlError}
+    </p>
+  );
+}
 
 export default function LoginPage() {
   const [state, formAction, pending] = useActionState(signIn, initialState);
@@ -37,6 +49,9 @@ export default function LoginPage() {
           </div>
         </CardHeader>
         <CardContent className="pb-6">
+          <Suspense fallback={null}>
+            <UrlErrorNotice />
+          </Suspense>
           <form action={formAction} className="grid gap-4" noValidate>
             <div className="grid gap-1.5">
               <Label htmlFor="email">Email</Label>

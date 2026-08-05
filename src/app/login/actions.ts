@@ -44,7 +44,7 @@ export async function requestPasswordReset(
     const supabase = await createClient();
     const siteUrl = process.env.SITE_URL ?? "http://localhost:3000";
     await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${siteUrl}/reset-password`,
+      redirectTo: `${siteUrl}/auth/callback?next=/reset-password`,
     });
   }
   // Always report success — no account enumeration.
