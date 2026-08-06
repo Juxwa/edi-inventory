@@ -1,4 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
+import { fetchAllPages } from "@/lib/paged";
 
 // Shared between page.tsx and export/route.ts so filters can't drift.
 
@@ -43,21 +44,27 @@ export type MonthlyRow = {
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
+// Paged: branch x month grouping can exceed the 1000-row PostgREST cap over
+// a long enough date range — order includes branch_id as a tiebreaker so
+// paging is deterministic.
 export async function fetchMonthly(
   supabase: Supabase,
   filters: SalesReportFilters,
 ): Promise<MonthlyRow[]> {
-  let query = supabase
-    .from("sales_by_month")
-    .select(
-      "branch_id, month, sale_count, gross, discount_total, net_sales, vat_total, net_of_vat, legacy_no_vat_count",
-    )
-    .gte("month", filters.from)
-    .lte("month", filters.to)
-    .order("month");
-  if (filters.branch) query = query.eq("branch_id", filters.branch);
-  const { data } = await query;
-  return (data as MonthlyRow[] | null) ?? [];
+  return fetchAllPages<MonthlyRow>((from: number, to: number) => {
+    let query = supabase
+      .from("sales_by_month")
+      .select(
+        "branch_id, month, sale_count, gross, discount_total, net_sales, vat_total, net_of_vat, legacy_no_vat_count",
+      )
+      .gte("month", filters.from)
+      .lte("month", filters.to)
+      .order("month", { ascending: true })
+      .order("branch_id", { ascending: true })
+      .range(from, to);
+    if (filters.branch) query = query.eq("branch_id", filters.branch);
+    return query;
+  });
 }
 
 // Collapse branch rows into one row per month (chart + table grain).
@@ -103,20 +110,25 @@ export type PerSaleRow = {
   net_of_vat: number;
 };
 
-// Per-sale accounting grain for CSV export.
+// Per-sale accounting grain for CSV export. Paged: this is per-sale grain,
+// which can easily exceed the 1000-row PostgREST cap over a long date range
+// — order includes sale_id as a unique tiebreaker for deterministic paging.
 export async function fetchPerSale(
   supabase: Supabase,
   filters: SalesReportFilters,
 ): Promise<PerSaleRow[]> {
-  let query = supabase
-    .from("sales_totals")
-    .select(
-      "sale_id, branch_id, sale_date, is_paid, gross, discount, net_sales, vat_amount, net_of_vat",
-    )
-    .gte("sale_date", filters.from)
-    .lte("sale_date", filters.to)
-    .order("sale_date");
-  if (filters.branch) query = query.eq("branch_id", filters.branch);
-  const { data } = await query;
-  return (data as PerSaleRow[] | null) ?? [];
+  return fetchAllPages<PerSaleRow>((from: number, to: number) => {
+    let query = supabase
+      .from("sales_totals")
+      .select(
+        "sale_id, branch_id, sale_date, is_paid, gross, discount, net_sales, vat_amount, net_of_vat",
+      )
+      .gte("sale_date", filters.from)
+      .lte("sale_date", filters.to)
+      .order("sale_date", { ascending: true })
+      .order("sale_id", { ascending: true })
+      .range(from, to);
+    if (filters.branch) query = query.eq("branch_id", filters.branch);
+    return query;
+  });
 }

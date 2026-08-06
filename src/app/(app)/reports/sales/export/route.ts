@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/supabase/profile";
 import { toCsv, csvResponse, type CsvColumn } from "@/lib/csv";
 import { parseSalesFilters, fetchPerSale, type PerSaleRow } from "../query";
+import { fetchAllPages } from "@/lib/paged";
 
 export const dynamic = "force-dynamic";
 
@@ -22,15 +23,24 @@ export async function GET(request: Request): Promise<Response> {
       : undefined,
   });
 
+  type SaleMeta = { id: string; or_no: string | null; customer_id: string | null };
+
   const supabase = await createClient();
+  // salesMeta is a raw `sales` read over the same date range as fetchPerSale
+  // and can exceed the 1000-row PostgREST cap just like it — paged with a
+  // unique tiebreaker (id) for deterministic paging.
   const [rows, branchesResult, salesMeta] = await Promise.all([
     fetchPerSale(supabase, filters),
     supabase.from("branches").select("id, name"),
-    supabase
-      .from("sales")
-      .select("id, or_no, customer_id")
-      .gte("sale_date", filters.from)
-      .lte("sale_date", filters.to),
+    fetchAllPages<SaleMeta>((from: number, to: number) =>
+      supabase
+        .from("sales")
+        .select("id, or_no, customer_id")
+        .gte("sale_date", filters.from)
+        .lte("sale_date", filters.to)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
   ]);
 
   const branchNameById = new Map<string, string>(
@@ -39,12 +49,8 @@ export async function GET(request: Request): Promise<Response> {
       row.name,
     ]),
   );
-  type SaleMeta = { id: string; or_no: string | null; customer_id: string | null };
   const metaById = new Map<string, SaleMeta>(
-    ((salesMeta.data as SaleMeta[] | null) ?? []).map((row: SaleMeta) => [
-      row.id,
-      row,
-    ]),
+    salesMeta.map((row: SaleMeta) => [row.id, row]),
   );
 
   const columns: CsvColumn<PerSaleRow>[] = [

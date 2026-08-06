@@ -1,4 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
+import { fetchAllPages } from "@/lib/paged";
 
 // Shared between page.tsx and export/route.ts so filters can't drift.
 
@@ -61,6 +62,10 @@ export type MovementRow = {
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
+// List-page fetch (one page at a time, `range` supplied by the caller).
+// Order includes `id` as a tiebreaker after occurred_at, since timestamps
+// aren't guaranteed unique — without it, paging could duplicate or skip
+// rows that share a timestamp.
 export async function fetchMovements(
   supabase: Supabase,
   filters: MovementFilters,
@@ -75,10 +80,36 @@ export async function fetchMovements(
     .gte("occurred_at", filters.from)
     // occurred_at is a timestamp; make the "to" date inclusive.
     .lt("occurred_at", `${filters.to}T23:59:59.999`)
-    .order("occurred_at", { ascending: false });
+    .order("occurred_at", { ascending: false })
+    .order("id", { ascending: false });
   if (filters.type) query = query.eq("movement_type", filters.type);
   if (filters.branch) query = query.eq("branch_id", filters.branch);
   if (range) query = query.range(range.from, range.to);
   const { data, count } = await query;
   return { rows: (data as MovementRow[] | null) ?? [], count: count ?? 0 };
+}
+
+// Export fetch: unlike fetchMovements (one list page), this pages through
+// *every* matching row. A date range spanning enough movement activity can
+// easily exceed the 1000-row PostgREST cap, which previously silently
+// truncated the export to the newest ~1000 movements.
+export async function fetchAllMovements(
+  supabase: Supabase,
+  filters: MovementFilters,
+): Promise<MovementRow[]> {
+  return fetchAllPages<MovementRow>((from: number, to: number) => {
+    let query = supabase
+      .from("movements_ledger")
+      .select(
+        "id, occurred_at, movement_type, quantity, branch_id, counterparty_branch_id, stock_id, product_id, serial_number, reference_type, reference_id, note",
+      )
+      .gte("occurred_at", filters.from)
+      .lt("occurred_at", `${filters.to}T23:59:59.999`)
+      .order("occurred_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to);
+    if (filters.type) query = query.eq("movement_type", filters.type);
+    if (filters.branch) query = query.eq("branch_id", filters.branch);
+    return query;
+  });
 }

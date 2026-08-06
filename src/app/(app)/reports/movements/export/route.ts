@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/supabase/profile";
 import { toCsv, csvResponse, type CsvColumn } from "@/lib/csv";
-import { parseMovementFilters, fetchMovements, type MovementRow } from "../query";
+import { parseMovementFilters, fetchAllMovements, type MovementRow } from "../query";
+import { chunkIds } from "@/lib/paged";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +25,8 @@ export async function GET(request: Request): Promise<Response> {
   });
 
   const supabase = await createClient();
-  const [{ rows }, branchesResult] = await Promise.all([
-    fetchMovements(supabase, filters),
+  const [rows, branchesResult] = await Promise.all([
+    fetchAllMovements(supabase, filters),
     supabase.from("branches").select("id, name"),
   ]);
 
@@ -43,19 +44,19 @@ export async function GET(request: Request): Promise<Response> {
         .filter((id: string | null): id is string => id !== null),
     ),
   );
-  let productNameById = new Map<string, string>();
-  if (productIds.length > 0) {
+  type ProductRow = { id: string; name: string };
+  const productNameById = new Map<string, string>();
+  // Chunked (URL-length safety): a full movement-history export can
+  // reference thousands of distinct products — a single .in() would blow
+  // the request URL.
+  for (const idChunk of chunkIds(productIds)) {
     const { data: productRows } = await supabase
       .from("products")
       .select("id, name")
-      .in("id", productIds);
-    type ProductRow = { id: string; name: string };
-    productNameById = new Map(
-      ((productRows as ProductRow[] | null) ?? []).map((row: ProductRow) => [
-        row.id,
-        row.name,
-      ]),
-    );
+      .in("id", idChunk);
+    for (const row of (productRows as ProductRow[] | null) ?? []) {
+      productNameById.set(row.id, row.name);
+    }
   }
 
   const columns: CsvColumn<MovementRow>[] = [

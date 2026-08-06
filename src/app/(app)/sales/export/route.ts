@@ -45,6 +45,15 @@ type ExportRow = {
   isFirstLineOfSale: boolean;
 };
 
+const PAGE = 1000;
+const ID_CHUNK = 150;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 export async function GET(request: Request): Promise<Response> {
   const profile = await getProfile();
   if (!profile || profile.role === "technical") {
@@ -92,112 +101,115 @@ export async function GET(request: Request): Promise<Response> {
 
   // Unlike /sales's list query, no `.is("voided_at", null)` here — voided
   // sales are exported too, flagged via the `voided` column.
-  let salesQuery = supabase
-    .from("sales")
-    .select(
-      "id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, sold_by, discount, is_paid, voided_at",
-    )
-    .order("sale_date", { ascending: false });
+  // Paged: PostgREST caps un-ranged queries at 1000 rows, which silently
+  // truncated large date ranges to the newest ~month of sales.
+  const sales: SaleQueryRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    let salesQuery = supabase
+      .from("sales")
+      .select(
+        "id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, sold_by, discount, is_paid, voided_at",
+      )
+      .order("sale_date", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + PAGE - 1);
 
-  if (fromDate) salesQuery = salesQuery.gte("sale_date", fromDate);
-  if (toDate) salesQuery = salesQuery.lte("sale_date", toDate);
-  if (lockedBranchId) salesQuery = salesQuery.eq("branch_id", lockedBranchId);
-  else if (branchParam) salesQuery = salesQuery.eq("branch_id", branchParam);
+    if (fromDate) salesQuery = salesQuery.gte("sale_date", fromDate);
+    if (toDate) salesQuery = salesQuery.lte("sale_date", toDate);
+    if (lockedBranchId) salesQuery = salesQuery.eq("branch_id", lockedBranchId);
+    else if (branchParam) salesQuery = salesQuery.eq("branch_id", branchParam);
 
-  if (q) {
-    const idList = matchingSaleIds ?? [];
-    const orNoFilter = `or_no.ilike.%${q}%`;
-    if (idList.length > 0) {
-      salesQuery = salesQuery.or(`${orNoFilter},id.in.(${idList.join(",")})`);
-    } else {
-      salesQuery = salesQuery.or(orNoFilter);
+    if (q) {
+      const idList = matchingSaleIds ?? [];
+      const orNoFilter = `or_no.ilike.%${q}%`;
+      if (idList.length > 0) {
+        salesQuery = salesQuery.or(`${orNoFilter},id.in.(${idList.join(",")})`);
+      } else {
+        salesQuery = salesQuery.or(orNoFilter);
+      }
     }
-  }
 
-  const { data: salesData } = await salesQuery;
-  const sales: SaleQueryRow[] = (salesData as SaleQueryRow[] | null) ?? [];
+    const { data: salesData } = await salesQuery;
+    const pageRows: SaleQueryRow[] = (salesData as SaleQueryRow[] | null) ?? [];
+    sales.push(...pageRows);
+    if (pageRows.length < PAGE) break;
+  }
   const saleById = new Map<string, SaleQueryRow>(
     sales.map((sale: SaleQueryRow) => [sale.id, sale]),
   );
   const saleIds = sales.map((sale: SaleQueryRow) => sale.id);
 
-  let lines: LineRow[] = [];
-  if (saleIds.length > 0) {
-    const { data: lineData } = await supabase
-      .from("sale_line_items")
-      .select(
-        "id, sale_id, line_type, product_id, service_id, quantity, unit_price, serial_snapshot, after_sales_status, created_at",
-      )
-      .in("sale_id", saleIds)
-      .order("sale_id")
-      .order("created_at");
-    lines = (lineData as LineRow[] | null) ?? [];
+  // Chunked (URL-length safety) and paged (1000-row cap) line fetch.
+  const lines: LineRow[] = [];
+  for (const idChunk of chunk(saleIds, ID_CHUNK)) {
+    for (let from = 0; ; from += PAGE) {
+      const { data: lineData } = await supabase
+        .from("sale_line_items")
+        .select(
+          "id, sale_id, line_type, product_id, service_id, quantity, unit_price, serial_snapshot, after_sales_status, created_at",
+        )
+        .in("sale_id", idChunk)
+        .order("sale_id")
+        .order("created_at")
+        .range(from, from + PAGE - 1);
+      const pageRows: LineRow[] = (lineData as LineRow[] | null) ?? [];
+      lines.push(...pageRows);
+      if (pageRows.length < PAGE) break;
+    }
   }
 
   const branchIds = Array.from(new Set(sales.map((sale: SaleQueryRow) => sale.branch_id)));
-  const customerIds = sales
-    .map((sale: SaleQueryRow) => sale.customer_id)
-    .filter((id: string | null): id is string => id !== null);
-  const soldByIds = sales
-    .map((sale: SaleQueryRow) => sale.sold_by)
-    .filter((id: string | null): id is string => id !== null);
-  const productIds = lines
-    .map((line: LineRow) => line.product_id)
-    .filter((id: string | null): id is string => id !== null);
-  const serviceIds = lines
-    .map((line: LineRow) => line.service_id)
-    .filter((id: string | null): id is string => id !== null);
+  const customerIds = Array.from(
+    new Set(
+      sales
+        .map((sale: SaleQueryRow) => sale.customer_id)
+        .filter((id: string | null): id is string => id !== null),
+    ),
+  );
+  const soldByIds = Array.from(
+    new Set(
+      sales
+        .map((sale: SaleQueryRow) => sale.sold_by)
+        .filter((id: string | null): id is string => id !== null),
+    ),
+  );
+  const productIds = Array.from(
+    new Set(
+      lines
+        .map((line: LineRow) => line.product_id)
+        .filter((id: string | null): id is string => id !== null),
+    ),
+  );
+  const serviceIds = Array.from(
+    new Set(
+      lines
+        .map((line: LineRow) => line.service_id)
+        .filter((id: string | null): id is string => id !== null),
+    ),
+  );
 
-  const [branchesResult, customersResult, profilesResult, productsResult, servicesResult] =
+  // Chunked name lookups: a full-history export can reference 10k+ distinct
+  // customers — a single .in() would blow the request URL and the row cap.
+  async function fetchNames(table: string, ids: string[]): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    for (const idChunk of chunk(ids, ID_CHUNK)) {
+      const { data } = await supabase.from(table).select("id, name").in("id", idChunk);
+      type NameRow = { id: string; name: string | null };
+      for (const row of ((data as NameRow[] | null) ?? [])) {
+        map.set(row.id, row.name ?? "");
+      }
+    }
+    return map;
+  }
+
+  const [branchNameById, customerNameById, profileNameById, productNameById, serviceNameById] =
     await Promise.all([
-      branchIds.length > 0
-        ? supabase.from("branches").select("id, name").in("id", branchIds)
-        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-      customerIds.length > 0
-        ? supabase.from("customers").select("id, name").in("id", customerIds)
-        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-      soldByIds.length > 0
-        ? supabase.from("profiles").select("id, name").in("id", soldByIds)
-        : Promise.resolve({ data: [] as { id: string; name: string | null }[] }),
-      productIds.length > 0
-        ? supabase.from("products").select("id, name").in("id", productIds)
-        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-      serviceIds.length > 0
-        ? supabase.from("services").select("id, name").in("id", serviceIds)
-        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      fetchNames("branches", branchIds),
+      fetchNames("customers", customerIds),
+      fetchNames("profiles", soldByIds),
+      fetchNames("products", productIds),
+      fetchNames("services", serviceIds),
     ]);
-
-  type NameRow = { id: string; name: string | null };
-  const branchNameById = new Map<string, string>(
-    ((branchesResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [
-      row.id,
-      row.name ?? "",
-    ]),
-  );
-  const customerNameById = new Map<string, string>(
-    ((customersResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [
-      row.id,
-      row.name ?? "",
-    ]),
-  );
-  const profileNameById = new Map<string, string>(
-    ((profilesResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [
-      row.id,
-      row.name ?? "",
-    ]),
-  );
-  const productNameById = new Map<string, string>(
-    ((productsResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [
-      row.id,
-      row.name ?? "",
-    ]),
-  );
-  const serviceNameById = new Map<string, string>(
-    ((servicesResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [
-      row.id,
-      row.name ?? "",
-    ]),
-  );
 
   // Build one export row per sale line. Discount is header-level (per
   // sale, not per line) — printed on each sale's first line only so

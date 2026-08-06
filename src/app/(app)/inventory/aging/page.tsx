@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllPages, chunkIds } from "@/lib/paged";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -57,12 +58,22 @@ export default async function StockAgingPage({
 
   const supabase = await createClient();
 
-  const { data: agingRows } = await supabase
-    .from("stock_aging")
-    .select("id, product_id, branch_id, serial_number, status, branch_date_received, days_on_hand")
-    .order("days_on_hand", { ascending: false });
-
-  const allRows: StockAgingRow[] = agingRows ?? [];
+  // Paged: this page computes a branch x bucket summary over the *entire*
+  // available-stock set, then paginates the detail table in memory — an
+  // un-ranged fetch here silently truncated both the summary and the
+  // detail table to the newest 1000 stock_aging rows (PostgREST's default
+  // cap). Order includes `id` as a tiebreaker since days_on_hand isn't
+  // unique.
+  const allRows = await fetchAllPages<StockAgingRow>((from: number, to: number) =>
+    supabase
+      .from("stock_aging")
+      .select(
+        "id, product_id, branch_id, serial_number, status, branch_date_received, days_on_hand",
+      )
+      .order("days_on_hand", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to),
+  );
 
   const productIds = Array.from(
     new Set(allRows.map((row: StockAgingRow) => row.product_id)),
@@ -71,22 +82,18 @@ export default async function StockAgingPage({
     new Set(allRows.map((row: StockAgingRow) => row.branch_id)),
   );
 
-  let productRows: { id: string; name: string }[] = [];
-  if (productIds.length > 0) {
-    const { data } = await supabase
-      .from("products")
-      .select("id, name")
-      .in("id", productIds);
-    productRows = data ?? [];
+  // Chunked (URL-length safety): a shop with a large catalog can easily
+  // reference more distinct products than a single .in() call can hold.
+  const productRows: { id: string; name: string }[] = [];
+  for (const idChunk of chunkIds(productIds)) {
+    const { data } = await supabase.from("products").select("id, name").in("id", idChunk);
+    productRows.push(...(data ?? []));
   }
 
-  let branchRows: { id: string; name: string }[] = [];
-  if (branchIds.length > 0) {
-    const { data } = await supabase
-      .from("branches")
-      .select("id, name")
-      .in("id", branchIds);
-    branchRows = data ?? [];
+  const branchRows: { id: string; name: string }[] = [];
+  for (const idChunk of chunkIds(branchIds)) {
+    const { data } = await supabase.from("branches").select("id, name").in("id", idChunk);
+    branchRows.push(...(data ?? []));
   }
 
   const productNameById = new Map<string, string>(

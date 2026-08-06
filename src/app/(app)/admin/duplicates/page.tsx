@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllPages, chunkIds } from "@/lib/paged";
 import { getProfile } from "@/lib/supabase/profile";
 import {
   Table,
@@ -36,33 +37,39 @@ export default async function DuplicateSerialsPage() {
   }
 
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("stock_duplicate_serials")
-    .select(
-      "id, serial_number, product_id, branch_id, status, quantity, branch_date_received, created_at",
-    );
-
-  const rows: DuplicateRow[] = (data as DuplicateRow[] | null) ?? [];
+  // Paged: legacy Bubble data can carry more than 1000 duplicate-serial
+  // rows across a multi-year history — an un-ranged select silently
+  // truncated the page (and hid duplicates from cleanup). Order matches the
+  // view's own grouping (serial, then received order) so duplicates still
+  // land next to each other for manual review, with `id` appended as a
+  // unique tiebreaker required for deterministic paging.
+  const rows = await fetchAllPages<DuplicateRow>((from: number, to: number) =>
+    supabase
+      .from("stock_duplicate_serials")
+      .select(
+        "id, serial_number, product_id, branch_id, status, quantity, branch_date_received, created_at",
+      )
+      .order("serial_number", { ascending: true })
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
   const productIds = Array.from(new Set(rows.map((row: DuplicateRow) => row.product_id)));
   const branchIds = Array.from(new Set(rows.map((row: DuplicateRow) => row.branch_id)));
 
-  const [productsResult, branchesResult] = await Promise.all([
-    productIds.length > 0
-      ? supabase.from("products").select("id, name").in("id", productIds)
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    branchIds.length > 0
-      ? supabase.from("branches").select("id, name").in("id", branchIds)
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-  ]);
-
   type NameRow = { id: string; name: string };
-  const productNameById = new Map<string, string>(
-    ((productsResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [row.id, row.name]),
-  );
-  const branchNameById = new Map<string, string>(
-    ((branchesResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [row.id, row.name]),
-  );
+  // Chunked (URL-length safety) name lookups.
+  const productNameById = new Map<string, string>();
+  for (const idChunk of chunkIds(productIds)) {
+    const { data } = await supabase.from("products").select("id, name").in("id", idChunk);
+    for (const row of (data as NameRow[] | null) ?? []) productNameById.set(row.id, row.name);
+  }
+  const branchNameById = new Map<string, string>();
+  for (const idChunk of chunkIds(branchIds)) {
+    const { data } = await supabase.from("branches").select("id, name").in("id", idChunk);
+    for (const row of (data as NameRow[] | null) ?? []) branchNameById.set(row.id, row.name);
+  }
 
   const groupCount = new Set(
     rows.map((row: DuplicateRow) => row.serial_number.trim().toLowerCase()),

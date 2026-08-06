@@ -1,4 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
+import { fetchAllPages } from "@/lib/paged";
 
 // Shared between page.tsx and the export/* routes so filters and aggregation
 // can't drift between the on-screen tables and their CSV exports.
@@ -81,35 +82,50 @@ export type ServiceSalesRow = {
   revenue: number;
 };
 
+// Paged: these are grouped-by views (product x branch x month, etc.) that
+// can exceed the 1000-row PostgREST cap once a shop has enough SKUs/branches
+// /history — an un-ranged select silently truncated to the newest rows.
+// Ordered by the view's own grouping columns (a unique combination) so
+// paging is deterministic.
 export async function fetchProductSales(
   supabase: Supabase,
   filters: AnalyticsFilters,
 ): Promise<ProductSalesRow[]> {
-  let query = supabase
-    .from("analytics_sales_by_product")
-    .select(
-      "product_id, product_name, category, branch_id, branch_name, month, units, revenue, cost",
-    )
-    .gte("month", filters.from)
-    .lte("month", filters.to);
-  if (filters.branch) query = query.eq("branch_id", filters.branch);
-  if (filters.category) query = query.eq("category", filters.category);
-  const { data } = await query;
-  return (data as ProductSalesRow[] | null) ?? [];
+  return fetchAllPages<ProductSalesRow>((from: number, to: number) => {
+    let query = supabase
+      .from("analytics_sales_by_product")
+      .select(
+        "product_id, product_name, category, branch_id, branch_name, month, units, revenue, cost",
+      )
+      .gte("month", filters.from)
+      .lte("month", filters.to)
+      .order("product_id", { ascending: true })
+      .order("branch_id", { ascending: true })
+      .order("month", { ascending: true })
+      .range(from, to);
+    if (filters.branch) query = query.eq("branch_id", filters.branch);
+    if (filters.category) query = query.eq("category", filters.category);
+    return query;
+  });
 }
 
 export async function fetchServiceSales(
   supabase: Supabase,
   filters: AnalyticsFilters,
 ): Promise<ServiceSalesRow[]> {
-  let query = supabase
-    .from("analytics_sales_by_service")
-    .select("service_id, service_name, branch_id, branch_name, month, units, revenue")
-    .gte("month", filters.from)
-    .lte("month", filters.to);
-  if (filters.branch) query = query.eq("branch_id", filters.branch);
-  const { data } = await query;
-  return (data as ServiceSalesRow[] | null) ?? [];
+  return fetchAllPages<ServiceSalesRow>((from: number, to: number) => {
+    let query = supabase
+      .from("analytics_sales_by_service")
+      .select("service_id, service_name, branch_id, branch_name, month, units, revenue")
+      .gte("month", filters.from)
+      .lte("month", filters.to)
+      .order("service_id", { ascending: true })
+      .order("branch_id", { ascending: true })
+      .order("month", { ascending: true })
+      .range(from, to);
+    if (filters.branch) query = query.eq("branch_id", filters.branch);
+    return query;
+  });
 }
 
 // Total non-voided sales in the period, for the "average sale value" KPI.
@@ -389,14 +405,17 @@ export async function fetchCustomerSales(
   supabase: Supabase,
   filters: AnalyticsFilters,
 ): Promise<CustomerSalesRow[]> {
-  let query = supabase
-    .from("analytics_sales_by_customer")
-    .select("sale_id, customer_id, customer_name, branch_id, branch_name, sale_date, net_sales")
-    .gte("sale_date", filters.from)
-    .lte("sale_date", filters.to);
-  if (filters.branch) query = query.eq("branch_id", filters.branch);
-  const { data } = await query;
-  return (data as CustomerSalesRow[] | null) ?? [];
+  return fetchAllPages<CustomerSalesRow>((from: number, to: number) => {
+    let query = supabase
+      .from("analytics_sales_by_customer")
+      .select("sale_id, customer_id, customer_name, branch_id, branch_name, sale_date, net_sales")
+      .gte("sale_date", filters.from)
+      .lte("sale_date", filters.to)
+      .order("sale_id", { ascending: true })
+      .range(from, to);
+    if (filters.branch) query = query.eq("branch_id", filters.branch);
+    return query;
+  });
 }
 
 // All-time (unbounded) equivalent of fetchCustomerSales, for the VIP table's
@@ -469,13 +488,16 @@ export async function fetchRepairsByProduct(
   supabase: Supabase,
   filters: AnalyticsFilters,
 ): Promise<RepairsByProductRow[]> {
-  const query = supabase
-    .from("analytics_repairs_by_product")
-    .select("product_id, product_name, category, month, repair_count")
-    .gte("month", filters.from)
-    .lte("month", filters.to);
-  const { data } = await query;
-  return (data as RepairsByProductRow[] | null) ?? [];
+  return fetchAllPages<RepairsByProductRow>((from: number, to: number) =>
+    supabase
+      .from("analytics_repairs_by_product")
+      .select("product_id, product_name, category, month, repair_count")
+      .gte("month", filters.from)
+      .lte("month", filters.to)
+      .order("product_id", { ascending: true })
+      .order("month", { ascending: true })
+      .range(from, to),
+  );
 }
 
 export type RepairsByProductAgg = {
