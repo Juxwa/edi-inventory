@@ -301,8 +301,16 @@ export async function importSales(file: string) {
     }).filter((l: Record<string, unknown>) => l.sale_id !== undefined);
 
   await batchUpsert(client, 'sale_line_items', lineRecords);
+
+  // Self-clean: imported headers whose every line landed in the exception
+  // report carry no amounts and render as "(no lines)" noise in the app.
+  // Only touches import-created rows (legacy_id 'sale:%') with zero lines.
+  const { data: childless } = await client.rpc('delete_childless_imported_sales');
+  const removed = typeof childless === 'number' ? childless : 0;
+
   writeExceptions('sales', exceptions);
   console.log(`sales: imported ${headers.length} headers, ${lineRecords.length} lines `
     + `(${rows.length} source rows), zero_price lines: ${zeroPriceCount}, `
-    + `auto-created customers: ${unresolvedNames.length}`);
+    + `auto-created customers: ${unresolvedNames.length}, `
+    + `childless headers removed: ${removed}`);
 }
