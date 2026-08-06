@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 
 export type SalesLineData = {
   name: string;
+  line_type: "stock" | "service";
   serial: string | null;
   warranty_expiry: string | null;
 };
@@ -64,6 +65,7 @@ export function SalesTable({ rows }: { rows: SalesRowData[] }) {
             <TableHead>Customer</TableHead>
             <TableHead>Branch</TableHead>
             <TableHead>Product</TableHead>
+            <TableHead>Service</TableHead>
             <TableHead>Serial no.</TableHead>
             <TableHead>Warranty expiry</TableHead>
             <TableHead className="text-right">Net</TableHead>
@@ -85,7 +87,18 @@ export function SalesTable({ rows }: { rows: SalesRowData[] }) {
                 {row.lines.length === 0
                   ? "—"
                   : row.lines.map((line: SalesLineData, index: number) => (
-                      <div key={index}>{line.name}</div>
+                      <div key={index}>
+                        {line.line_type === "stock" ? line.name : "—"}
+                      </div>
+                    ))}
+              </TableCell>
+              <TableCell>
+                {row.lines.length === 0
+                  ? "—"
+                  : row.lines.map((line: SalesLineData, index: number) => (
+                      <div key={index}>
+                        {line.line_type === "service" ? line.name : "—"}
+                      </div>
                     ))}
               </TableCell>
               <TableCell>

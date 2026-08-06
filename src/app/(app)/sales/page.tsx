@@ -198,6 +198,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
     existing.gross += line.quantity * line.unit_price;
     existing.lines.push({
       name: lineName(line),
+      line_type: line.line_type,
       serial: line.serial_snapshot,
       warranty_expiry: line.warranty_expiry,
     });

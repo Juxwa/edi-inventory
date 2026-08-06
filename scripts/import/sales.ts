@@ -41,8 +41,24 @@ export function groupSaleRows(rows: Row[]): SaleGroup[] {
   return order.map((key: string) => groups.get(key)!);
 }
 
+// The Bubble "Stock/Service" column is the authority on line type (client
+// decision, 2026-08-06). Blank falls back to inferring from Service Name.
 function isServiceLine(row: Row): boolean {
-  return clean(row['Service Name']) !== null || clean(row['Stock/Service']) === 'Service';
+  const kind = clean(row['Stock/Service']);
+  if (kind === 'Service') return true;
+  if (kind === 'Stock') return false;
+  return clean(row['Service Name']) !== null;
+}
+
+// Service rows with an amount but no service name import against this
+// placeholder so the revenue is preserved; client reclassifies later.
+export const UNSPECIFIED_SERVICE = 'Unspecified service (legacy)';
+
+// Bubble carries the service in two columns: "Service Name" (text copy) and
+// "Service" (the linked record's display text). Either may be blank; prefer
+// the name, fall back to the reference, then the placeholder.
+export function serviceNameOf(row: Row): string {
+  return clean(row['Service Name']) ?? clean(row['Service']) ?? UNSPECIFIED_SERVICE;
 }
 
 export type MapSaleGroupResult = {
@@ -130,8 +146,8 @@ export function mapSaleGroup(group: SaleGroup, ctx: SaleCtx): MapSaleGroupResult
       : 'sold';
 
     if (isServiceLine(row)) {
-      const serviceName = clean(row['Service Name']);
-      const service_id = serviceName ? ctx.services.get(serviceName) : undefined;
+      const serviceName = serviceNameOf(row);
+      const service_id = ctx.services.get(serviceName);
       if (!service_id) {
         exceptions.push({ row: index + 2, reason: `unknown service: ${row['Service Name']}`,
           data: JSON.stringify(row) });
@@ -222,12 +238,14 @@ export async function importSales(file: string) {
   const groups = groupSaleRows(rows);
 
   // First pass: resolve unknown service names and stub-upsert them (like phase 1 pricing importer).
+  // Service rows with a blank name map to the UNSPECIFIED_SERVICE placeholder
+  // (client decision: Stock/Service column is the type authority; amounts on
+  // nameless service rows must be preserved, not dropped).
   const unknownServiceNames = new Set<string>();
   for (const group of groups) {
     for (const { row } of group.rows) {
       if (isServiceLine(row)) {
-        const name = clean(row['Service Name']);
-        if (name) unknownServiceNames.add(name);
+        unknownServiceNames.add(serviceNameOf(row));
       }
     }
   }
