@@ -46,7 +46,12 @@ export default async function StockIntakePage() {
       </div>
 
       <div className="max-w-2xl">
-        <IntakeForm products={products} branches={branches} suppliers={suppliers} />
+        <IntakeForm
+          products={products}
+          branches={branches}
+          suppliers={suppliers}
+          defaultBranchId={profile.branch_id}
+        />
       </div>
     </div>
   );

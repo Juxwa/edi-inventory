@@ -42,6 +42,7 @@ type IntakeFormProps = {
   products: IntakeProductOption[];
   branches: IntakeBranchOption[];
   suppliers: IntakeSupplierOption[];
+  defaultBranchId?: string | null;
 };
 
 function ProductPicker({
@@ -117,7 +118,12 @@ function ProductPicker({
   );
 }
 
-export function IntakeForm({ products, branches, suppliers }: IntakeFormProps) {
+export function IntakeForm({
+  products,
+  branches,
+  suppliers,
+  defaultBranchId,
+}: IntakeFormProps) {
   const router = useRouter();
   const [state, formAction, pending] = useActionState<
     IntakeActionState,
@@ -218,7 +224,11 @@ export function IntakeForm({ products, branches, suppliers }: IntakeFormProps) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label htmlFor="branch_id">Branch</Label>
-          <Select name="branch_id" disabled={pending}>
+          <Select
+            name="branch_id"
+            disabled={pending}
+            defaultValue={defaultBranchId ?? undefined}
+          >
             <SelectTrigger id="branch_id">
               <SelectValue placeholder="Select branch" />
             </SelectTrigger>
