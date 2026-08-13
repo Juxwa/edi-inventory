@@ -22,7 +22,12 @@ import {
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/client";
 import { recordSale } from "@/app/(app)/sales/actions";
-import { initialSaleState, type SaleActionState } from "@/lib/validators/sale";
+import {
+  initialSaleState,
+  DISCOUNT_TYPES,
+  type SaleActionState,
+  type DiscountType,
+} from "@/lib/validators/sale";
 
 export type SaleCustomerOption = {
   id: string;
@@ -75,6 +80,18 @@ function todayIsoDate(): string {
   const dd = String(now.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
+  none: "None",
+  senior_citizen: "Senior Citizen (20%)",
+  pwd: "PWD (20%)",
+  custom_percent: "Custom %",
+  custom_amount: "Custom amount",
+};
 
 function CustomerPicker({
   customers,
@@ -315,10 +332,10 @@ export function SaleForm({
     useState<SaleCustomerOption | null>(null);
   const [useNewCustomer, setUseNewCustomer] = useState(false);
   const [lines, setLines] = useState<DraftLine[]>([]);
-  const [discount, setDiscount] = useState("0");
-  // VAT auto-computes (12/112 of net, PH VAT-inclusive) until manually edited.
-  const [vatManual, setVatManual] = useState("");
-  const [vatTouched, setVatTouched] = useState(false);
+  const [discountType, setDiscountType] = useState<DiscountType>("none");
+  const [discountIdNo, setDiscountIdNo] = useState("");
+  const [discountPercent, setDiscountPercent] = useState("");
+  const [discountAmount, setDiscountAmount] = useState("");
   const [serviceSelectValue, setServiceSelectValue] = useState<string>("");
 
   useEffect(() => {
@@ -403,14 +420,36 @@ export function SaleForm({
     [lines],
   );
 
-  const discountValue = Number.parseFloat(discount) || 0;
-  const net = Math.max(0, gross - discountValue);
-  const discountExceedsGross = discountValue > gross;
+  // Mirrors the server-side formulas in sales/actions.ts (computeDiscountAndVat) —
+  // this is display-only; the server recomputes from the submitted lines and
+  // never trusts these client totals. Prices are VAT-inclusive (12%).
+  const discountPercentValue = Number.parseFloat(discountPercent) || 0;
+  const discountAmountValue = Number.parseFloat(discountAmount) || 0;
+  const isScOrPwd = discountType === "senior_citizen" || discountType === "pwd";
 
-  const defaultVat = Math.round(((net * 12) / 112) * 100) / 100;
-  const vat = vatTouched ? vatManual : defaultVat.toFixed(2);
-  const vatValue = Number.parseFloat(vat) || 0;
+  const vatExemptBase = round2(gross / 1.12);
+  const vatExemptRemoved = round2(gross - vatExemptBase);
+
+  let discountValue = 0;
+  let vatValue = 0;
+  if (isScOrPwd) {
+    discountValue = round2(vatExemptBase * 0.2);
+    vatValue = 0;
+  } else if (discountType === "custom_percent") {
+    discountValue = round2(gross * (discountPercentValue / 100));
+    vatValue = round2(((gross - discountValue) * 12) / 112);
+  } else if (discountType === "custom_amount") {
+    discountValue = round2(Math.min(discountAmountValue, gross));
+    vatValue = round2(((gross - discountValue) * 12) / 112);
+  } else {
+    discountValue = 0;
+    vatValue = round2((gross * 12) / 112);
+  }
+
+  const net = Math.max(0, gross - discountValue);
   const netOfVat = Math.max(0, net - vatValue);
+  const netPayable = isScOrPwd ? Math.max(0, vatExemptBase - discountValue) : net;
+  const discountExceedsGross = discountType === "custom_amount" && discountAmountValue > gross;
 
   const linesJson = useMemo(
     () =>
@@ -630,88 +669,149 @@ export function SaleForm({
           </Table>
         </div>
 
-        <div className="flex flex-col items-end gap-2 text-sm">
-          <div className="flex w-full max-w-xs items-center justify-between">
-            <span className="text-muted-foreground">Gross</span>
-            <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
-          </div>
-          <div className="flex w-full max-w-xs items-center justify-between gap-3">
-            <Label htmlFor="discount" className="text-muted-foreground">
-              Discount
-            </Label>
-            <Input
-              id="discount"
-              name="discount"
-              type="number"
-              min="0"
-              step="0.01"
-              value={discount}
+        <div className="grid gap-3 sm:max-w-md">
+          <div className="grid gap-1.5">
+            <Label htmlFor="discount_type">Discount</Label>
+            <Select
+              value={discountType}
+              onValueChange={(value: string) => setDiscountType(value as DiscountType)}
               disabled={pending}
-              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                setDiscount(event.target.value)
-              }
-              className="h-8 w-28 text-right"
-            />
-          </div>
-          {discountExceedsGross ? (
-            <p className="text-xs font-medium text-warning-foreground">
-              Discount exceeds gross total — net is clamped to ₱0.00.
-            </p>
-          ) : null}
-          <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
-            <span className="font-semibold">Net</span>
-            <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
-          </div>
-          <div className="flex w-full max-w-xs items-center justify-between gap-3">
-            <Label htmlFor="vat_amount" className="text-muted-foreground">
-              VAT (12/112)
-            </Label>
-            <Input
-              id="vat_amount"
-              name="vat_amount"
-              type="number"
-              min="0"
-              step="0.01"
-              value={vat}
-              disabled={pending}
-              onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
-                setVatTouched(true);
-                setVatManual(event.target.value);
-              }}
-              className="h-8 w-28 text-right"
-            />
-          </div>
-          <div className="flex w-full max-w-xs items-center justify-between">
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => {
-                setVatTouched(true);
-                setVatManual("0");
-              }}
-              className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
             >
-              VAT-exempt (set to 0)
-            </button>
-            {vatTouched ? (
-              <button
-                type="button"
+              <SelectTrigger id="discount_type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DISCOUNT_TYPES.map((type: DiscountType) => (
+                  <SelectItem key={type} value={type}>
+                    {DISCOUNT_TYPE_LABELS[type]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {/* The Select above is controlled for live recompute; this hidden
+                input is what actually submits discount_type in the form. */}
+            <input type="hidden" name="discount_type" value={discountType} />
+          </div>
+
+          {isScOrPwd ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="discount_id_no">
+                {discountType === "senior_citizen" ? "Senior Citizen ID no." : "PWD ID no."}
+              </Label>
+              <Input
+                id="discount_id_no"
+                name="discount_id_no"
+                required
                 disabled={pending}
-                onClick={() => {
-                  setVatTouched(false);
-                  setVatManual("");
-                }}
-                className="text-xs font-medium text-primary hover:underline disabled:opacity-50"
-              >
-                Recompute
-              </button>
-            ) : null}
-          </div>
-          <div className="flex w-full max-w-xs items-center justify-between">
-            <span className="text-muted-foreground">Net of VAT</span>
-            <span className="font-medium tabular-nums">{formatCurrency(netOfVat)}</span>
-          </div>
+                value={discountIdNo}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                  setDiscountIdNo(event.target.value)
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Required by BIR for Senior Citizen / PWD VAT-exempt sales (RA 9994 / RA 10754).
+              </p>
+            </div>
+          ) : null}
+
+          {discountType === "custom_percent" ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="discount_percent">Discount %</Label>
+              <Input
+                id="discount_percent"
+                name="discount_percent"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                disabled={pending}
+                value={discountPercent}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                  setDiscountPercent(event.target.value)
+                }
+                className="w-28"
+              />
+            </div>
+          ) : null}
+
+          {discountType === "custom_amount" ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="discount_amount">Discount amount</Label>
+              <Input
+                id="discount_amount"
+                name="discount_amount"
+                type="number"
+                min="0"
+                step="0.01"
+                disabled={pending}
+                value={discountAmount}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                  setDiscountAmount(event.target.value)
+                }
+                className="w-28"
+              />
+              {discountExceedsGross ? (
+                <p className="text-xs font-medium text-warning-foreground">
+                  Discount exceeds gross total — it will be clamped to {formatCurrency(gross)}.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
+
+        {isScOrPwd ? (
+          <div className="flex flex-col items-end gap-2 text-sm">
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Gross (VAT-inc)</span>
+              <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Less: VAT (exempt)</span>
+              <span className="font-medium tabular-nums">
+                -{formatCurrency(vatExemptRemoved)}
+              </span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
+              <span className="text-muted-foreground">VAT-exempt sale</span>
+              <span className="font-medium tabular-nums">{formatCurrency(vatExemptBase)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Less: 20% discount</span>
+              <span className="font-medium tabular-nums">-{formatCurrency(discountValue)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
+              <span className="font-semibold">Net payable</span>
+              <span className="font-semibold tabular-nums">{formatCurrency(netPayable)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">VAT recorded</span>
+              <span className="font-medium tabular-nums">{formatCurrency(0)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-end gap-2 text-sm">
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Gross</span>
+              <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Discount</span>
+              <span className="font-medium tabular-nums">{formatCurrency(discountValue)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
+              <span className="font-semibold">Net</span>
+              <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">VAT (12/112, informational)</span>
+              <span className="font-medium tabular-nums">{formatCurrency(vatValue)}</span>
+            </div>
+            <div className="flex w-full max-w-xs items-center justify-between">
+              <span className="text-muted-foreground">Net of VAT</span>
+              <span className="font-medium tabular-nums">{formatCurrency(netOfVat)}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {state.error ? (

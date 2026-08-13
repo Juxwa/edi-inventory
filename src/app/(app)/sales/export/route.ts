@@ -22,6 +22,8 @@ type SaleQueryRow = {
   branch_id: string;
   sold_by: string | null;
   discount: number | null;
+  discount_type: string | null;
+  discount_id_no: string | null;
   is_paid: boolean;
   voided_at: string | null;
 };
@@ -108,7 +110,7 @@ export async function GET(request: Request): Promise<Response> {
     let salesQuery = supabase
       .from("sales")
       .select(
-        "id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, sold_by, discount, is_paid, voided_at",
+        "id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, sold_by, discount, discount_type, discount_id_no, is_paid, voided_at",
       )
       .order("sale_date", { ascending: false })
       .order("id", { ascending: false })
@@ -280,6 +282,14 @@ export async function GET(request: Request): Promise<Response> {
     {
       header: "Discount",
       value: (row) => (row.isFirstLineOfSale ? (row.sale.discount ?? 0) : ""),
+    },
+    {
+      header: "Discount type",
+      value: (row) => (row.isFirstLineOfSale ? (row.sale.discount_type ?? "none") : ""),
+    },
+    {
+      header: "Discount ID no.",
+      value: (row) => (row.isFirstLineOfSale ? row.sale.discount_id_no : ""),
     },
     { header: "Paid", value: (row) => (row.sale.is_paid ? "yes" : "no") },
     {

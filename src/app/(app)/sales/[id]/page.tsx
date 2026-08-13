@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { AfterSalesStatus } from "@/lib/validators/sale";
+import type { AfterSalesStatus, DiscountType } from "@/lib/validators/sale";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +37,20 @@ type SaleDetailRow = {
   referred_by: string | null;
   discount: number | null;
   vat_amount: number | null;
+  discount_type: DiscountType | null;
+  discount_id_no: string | null;
   is_paid: boolean;
   voided_at: string | null;
   voided_by: string | null;
   void_reason: string | null;
+};
+
+const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
+  none: "None",
+  senior_citizen: "Senior Citizen (20%)",
+  pwd: "PWD (20%)",
+  custom_percent: "Custom %",
+  custom_amount: "Custom amount",
 };
 
 type LineRow = {
@@ -105,7 +115,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const { data: sale, error: saleError } = await supabase
     .from("sales")
     .select(
-      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, vat_amount, is_paid, voided_at, voided_by, void_reason",
+      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, vat_amount, discount_type, discount_id_no, is_paid, voided_at, voided_by, void_reason",
     )
     .eq("id", id)
     .single();
@@ -175,6 +185,14 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   );
   const discount = saleRow.discount ?? 0;
   const net = Math.max(0, gross - discount);
+  const discountType: DiscountType = saleRow.discount_type ?? "none";
+  const isScOrPwd = discountType === "senior_citizen" || discountType === "pwd";
+  // Same formula as the sale form / server: vat_exempt_base = gross / 1.12;
+  // the VAT removed for SC/PWD is never stored (vat_amount is recorded as 0
+  // to mean "exempt"), so it's re-derived here for display.
+  const vatExemptBase = Math.round((gross / 1.12) * 100) / 100;
+  const vatExemptRemoved = Math.round((gross - vatExemptBase) * 100) / 100;
+  const netPayable = isScOrPwd ? Math.max(0, vatExemptBase - discount) : net;
 
   const isVoided = saleRow.voided_at !== null;
   const canReturn =
@@ -271,6 +289,18 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
             <p className="text-muted-foreground">Discount</p>
             <p className="font-medium">{formatCurrency(discount)}</p>
           </div>
+          <div>
+            <p className="text-muted-foreground">Discount type</p>
+            <p className="font-medium">{DISCOUNT_TYPE_LABELS[discountType]}</p>
+          </div>
+          {isScOrPwd ? (
+            <div>
+              <p className="text-muted-foreground">
+                {discountType === "senior_citizen" ? "Senior Citizen ID no." : "PWD ID no."}
+              </p>
+              <p className="font-medium">{saleRow.discount_id_no ?? "—"}</p>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -360,34 +390,67 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
             </Table>
           </div>
 
-          <div className="flex flex-col items-end gap-2 text-sm">
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Gross</span>
-              <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
+          {isScOrPwd ? (
+            <div className="flex flex-col items-end gap-2 text-sm">
+              <div className="flex w-full max-w-xs items-center justify-between">
+                <span className="text-muted-foreground">Gross (VAT-inc)</span>
+                <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between">
+                <span className="text-muted-foreground">Less: VAT (exempt)</span>
+                <span className="font-medium tabular-nums">
+                  -{formatCurrency(vatExemptRemoved)}
+                </span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
+                <span className="text-muted-foreground">VAT-exempt sale</span>
+                <span className="font-medium tabular-nums">{formatCurrency(vatExemptBase)}</span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between">
+                <span className="text-muted-foreground">Less: 20% discount</span>
+                <span className="font-medium tabular-nums">-{formatCurrency(discount)}</span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
+                <span className="font-semibold">Net payable</span>
+                <span className="font-semibold tabular-nums">{formatCurrency(netPayable)}</span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between">
+                <span className="text-muted-foreground">VAT recorded</span>
+                <span className="font-medium tabular-nums">
+                  {formatCurrency(saleRow.vat_amount ?? 0)}
+                </span>
+              </div>
             </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Discount</span>
-              <span className="font-medium tabular-nums">{formatCurrency(discount)}</span>
+          ) : (
+            <div className="flex flex-col items-end gap-2 text-sm">
+              <div className="flex w-full max-w-xs items-center justify-between">
+                <span className="text-muted-foreground">Gross</span>
+                <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between">
+                <span className="text-muted-foreground">Discount</span>
+                <span className="font-medium tabular-nums">{formatCurrency(discount)}</span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
+                <span className="font-semibold">Net</span>
+                <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between">
+                <span className="text-muted-foreground">VAT</span>
+                <span className="font-medium tabular-nums">
+                  {saleRow.vat_amount !== null ? formatCurrency(saleRow.vat_amount) : "—"}
+                </span>
+              </div>
+              <div className="flex w-full max-w-xs items-center justify-between">
+                <span className="text-muted-foreground">Net of VAT</span>
+                <span className="font-medium tabular-nums">
+                  {saleRow.vat_amount !== null
+                    ? formatCurrency(Math.max(0, net - saleRow.vat_amount))
+                    : "—"}
+                </span>
+              </div>
             </div>
-            <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
-              <span className="font-semibold">Net</span>
-              <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">VAT</span>
-              <span className="font-medium tabular-nums">
-                {saleRow.vat_amount !== null ? formatCurrency(saleRow.vat_amount) : "—"}
-              </span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Net of VAT</span>
-              <span className="font-medium tabular-nums">
-                {saleRow.vat_amount !== null
-                  ? formatCurrency(Math.max(0, net - saleRow.vat_amount))
-                  : "—"}
-              </span>
-            </div>
-          </div>
+          )}
         </CardContent>
       </Card>
     </div>

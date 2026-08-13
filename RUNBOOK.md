@@ -902,3 +902,51 @@ Watch particularly for:
 - `resulted_in_sale_id` linking supports unlinking (picking "No sale linked" writes `null`) — this is a small addition beyond the plan's literal ask, kept because it was nearly free once the linking form existed and avoids a one-way-only relationship being awkward to fix from a mis-click.
 - The hearing-tests page resolves signed URLs sequentially per visit per attachment path (same pattern as `visit-list.tsx`'s `resolveAttachmentLinks`) — fine at the current data volume; if a single page of 50 hearing-test visits each carries several large attachments, this could add noticeable page-load latency. Worth revisiting (e.g., batching or lazy-loading per-dialog-open) if that becomes a real pattern.
 - The "purchased during visit" boolean and the new `resulted_in_sale_id` FK are intentionally two independent signals (per the plan) — a visit can have `purchased_during_visit = true` with no linked sale (reviewer hasn't gotten to it yet) or a linked sale with the boolean left unticked (branch forgot to check it) — the UI doesn't attempt to reconcile or auto-sync these two fields.
+
+# Discount templates — PH Senior Citizen / PWD VAT-exempt discounts (2026-08-11)
+
+Built with Read/Write/Edit/Grep only (bash unavailable, Glob avoided for `(app)` paths). **Not compiled or run locally.** Migration used: `0047_discount_templates.sql`.
+
+## 1. Push migration 0047
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: `0047_discount_templates.sql` applies cleanly. It adds `sales.discount_type text` (check-constrained to `none | senior_citizen | pwd | custom_percent | custom_amount`, plain text — not an enum — so future templates don't need a migration) and `sales.discount_id_no text`, then drops and recreates `sale_record(...)` with two new trailing params: `p_discount_type text default 'none'`, `p_discount_id_no text default null`. Verify in the dashboard: Table Editor → `sales` has the two new columns; Database → Functions → `sale_record` shows the extended 13-arg signature (old 11-arg one gone, since PostgREST can't disambiguate overloads).
+
+## 2. Build
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- No generated `Database` type exists in this repo — every new `.from("sales")` column reference (`discount_type`, `discount_id_no`) and the `.rpc("sale_record", ...)` call are loosely typed; a typo'd param name only surfaces at runtime (Supabase would report "function not found" since PostgREST matches by full signature).
+- `src/lib/validators/sale.ts`'s `recordSaleSchema` dropped the old bare `discount`/`vat_amount` form fields entirely, replaced by `discount_type` (enum, defaults `"none"`), `discount_id_no`, `discount_percent` (0-100), `discount_amount` — all validated together in one `.superRefine()` (ID required for SC/PWD, percent required for custom_percent, amount required for custom_amount).
+- `src/app/(app)/sales/actions.ts`'s `recordSale` no longer trusts any client-submitted discount/VAT total — it recomputes both from `data.lines` (gross) and the template selection via the new `computeDiscountAndVat()` helper (formulas commented in place), then sends the computed numbers as `p_discount`/`p_vat_amount` to the RPC alongside `p_discount_type`/`p_discount_id_no`. The RPC re-validates the SC/PWD ID-required + VAT-must-be-zero rule as a second layer of defense.
+- `src/components/sales/sale-form.tsx` mirrors the same math client-side purely for live display (gross/discount/VAT/net recompute on every keystroke) — the mirrored formulas must stay in sync with `actions.ts` if either changes. The Template `Select` is controlled (for the live conditional UI) with a separate `<input type="hidden" name="discount_type">` doing the actual form submission, since a controlled Radix `Select` with both `name` and `value` set was avoided for clarity.
+
+## 3. What was built
+
+- **Math (all templates), prices are VAT-inclusive 12%:**
+  - `none` — discount = 0; VAT = gross × 12/112.
+  - `senior_citizen` / `pwd` (RA 9994 / RA 10754) — `vat_exempt_base = gross / 1.12`; `discount = vat_exempt_base × 0.20`; `net payable = vat_exempt_base − discount`; VAT **recorded** = 0 (sale is legally VAT-exempt — the VAT removed, `gross − vat_exempt_base`, is shown separately as "Less: VAT (exempt)," never folded into the discount figure). Requires an SC/PWD ID number (BIR record-keeping).
+  - `custom_percent` — discount = gross × pct/100 (pct 0-100); VAT = (gross − discount) × 12/112.
+  - `custom_amount` — discount = min(typed amount, gross); VAT = (gross − discount) × 12/112.
+  - Every amount rounds to 2dp both client-side (display) and server-side (values sent to the RPC).
+- **Verification example (from the spec):** ₱1,120.00 gross, Senior Citizen → `vat_exempt_base = 1120 / 1.12 = 1000.00` → discount = `1000.00 × 0.20 = 200.00` → net payable = `1000.00 − 200.00 = 800.00` → VAT recorded = `0.00`. Matches `computeDiscountAndVat` in `actions.ts` and the mirrored client formula in `sale-form.tsx` exactly.
+- **Sale form** (`src/components/sales/sale-form.tsx`): the old bare "Discount" + manual "VAT (12/112)" override inputs are gone, replaced by a "Discount" template `Select` (None / Senior Citizen (20%) / PWD (20%) / Custom % / Custom amount). Senior Citizen/PWD shows a required ID-number input plus a breakdown box: Gross (VAT-inc) → Less: VAT (exempt) → VAT-exempt sale → Less: 20% discount → **Net payable** → VAT recorded (always ₱0.00). Custom % shows a 0-100 percent input; Custom amount shows an amount input (with a "will be clamped" warning if it exceeds gross); both (and None) show a simple totals block: Gross, Discount, Net, VAT (12/112, informational), Net of VAT. Everything recomputes live off the existing line-item state.
+- **Server action** (`src/app/(app)/sales/actions.ts`): new `computeDiscountAndVat()` — pure function, gross total in, `{discount, vatAmount}` out, switch over the five templates per the formulas above. `recordSale` now sums `data.lines` for gross, calls this helper, and passes the computed values (never the client's) to `sale_record` along with `p_discount_type`/`p_discount_id_no`.
+- **Sale detail page** (`src/app/(app)/sales/[id]/page.tsx`): Details card gains "Discount type" (label) and, for SC/PWD, the ID number field. The Lines card's totals block branches the same way as the form: SC/PWD sales get the full VAT-exempt breakdown (VAT-exempt amount and net payable are re-derived from `gross`/`discount` on the fly since the VAT removed was never stored — `vat_amount` is 0 by design); everything else keeps the original Gross/Discount/Net/VAT/Net-of-VAT block.
+- **CSV export** (`src/app/(app)/sales/export/route.ts`): "Discount type" and "Discount ID no." columns added immediately after "Discount" (same per-sale-first-line-only convention as the existing Discount column, so summing Line total doesn't double count).
+- **Not touched (deliberately):** `sales_totals` view (0014) and the reports/analytics `net_sales`/`net_of_vat` formulas still compute `gross − discount` (and `− vat_amount`) generically — for SC/PWD this does **not** equal the true net payable, because the VAT removed (₱120 in the ₱1,120 example) is real money off the price but is neither part of the stored `discount` nor the stored `vat_amount` (which is 0 by design, to mean "exempt," not "no VAT was ever embedded in the price"). The sale form and sale detail page both re-derive and display the true net payable via `vat_exempt_base`; the generic reporting views were out of scope for this task and were left untouched.
+
+## 4. Manual checklist
+
+- **Senior Citizen sale:** record a sale with one line at ₱1,120.00 (e.g. quantity 1 × unit price 1,120). Select Discount = "Senior Citizen (20%)" — an ID number field appears; try submitting with it blank (expect a validation error, both client-side "Required" style and, if bypassed, the server's "ID number is required..." message). Fill in an ID, confirm the breakdown box shows Gross ₱1,120.00 → Less: VAT (exempt) −₱120.00 → VAT-exempt sale ₱1,000.00 → Less: 20% discount −₱200.00 → **Net payable ₱800.00** → VAT recorded ₱0.00. Submit — on the detail page, confirm Discount = ₱200.00, Discount type = "Senior Citizen (20%)", the ID number shows, VAT recorded = ₱0.00, and the same breakdown block appears with Net payable ₱800.00.
+- **PWD sale:** repeat with Discount = "PWD (20%)" — same math, label reads "PWD ID no.".
+- **Custom % sale:** Discount = "Custom %", enter 10 — confirm Discount = 10% of gross, VAT recomputes off the discounted amount (informational), Net = gross − discount. Submit and confirm the detail page's plain (non-SC/PWD) totals block matches.
+- **Custom amount sale:** Discount = "Custom amount", type an amount larger than gross — confirm the "will be clamped" warning appears and the recorded discount clamps to gross (net = ₱0.00) after submit.
+- **None (unchanged behavior):** Discount = "None" (the default) — confirm no discount fields appear, VAT auto-computes at 12/112 of gross exactly like before this change, and the detail page shows Discount ₱0.00, Discount type "None".
+- **CSV export:** from `/sales`, export CSV — confirm "Discount type" and "Discount ID no." columns appear right after "Discount", populated only on each sale's first exported line (blank on subsequent lines of a multi-line sale), and that a Senior Citizen sale's row shows "senior_citizen" + the ID number typed above.

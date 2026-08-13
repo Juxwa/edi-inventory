@@ -56,11 +56,6 @@ function toNumberOrNull(value: unknown): unknown {
   return Number.isNaN(parsed) ? text : parsed;
 }
 
-const nonNegativeNumber = z.preprocess(
-  toNumberOrNull,
-  z.number().min(0, "Must be zero or greater"),
-);
-
 const positiveQuantity = z.preprocess(
   toNumberOrNull,
   z.number().positive("Quantity must be greater than zero"),
@@ -71,6 +66,15 @@ const optionalNonNegativeNumber = z.preprocess(
   z.number().min(0, "Must be zero or greater").nullable(),
 );
 
+const optionalPercent = z.preprocess(
+  toNumberOrNull,
+  z
+    .number()
+    .min(0, "Must be zero or greater")
+    .max(100, "Must be 100 or less")
+    .nullable(),
+);
+
 const booleanFromFormString = z.preprocess((value: unknown) => {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") return value.trim().toLowerCase() === "true";
@@ -79,6 +83,24 @@ const booleanFromFormString = z.preprocess((value: unknown) => {
 
 export const LINE_TYPES = ["stock", "service"] as const;
 export type LineType = (typeof LINE_TYPES)[number];
+
+// PH discount templates (RA 9994 Senior Citizen / RA 10754 PWD 20%
+// VAT-exempt discount, plus free-form custom templates). "none" is the
+// default — plain text on the DB side (not an enum) so future templates
+// don't need a migration; validated here instead.
+export const DISCOUNT_TYPES = [
+  "none",
+  "senior_citizen",
+  "pwd",
+  "custom_percent",
+  "custom_amount",
+] as const;
+export type DiscountType = (typeof DISCOUNT_TYPES)[number];
+
+const discountTypeSchema = z.preprocess((value: unknown) => {
+  const text = toOptionalText(value);
+  return text ?? "none";
+}, z.enum(DISCOUNT_TYPES, { errorMap: () => ({ message: "Invalid discount type" }) }));
 
 const saleLineSchema = z
   .object({
@@ -119,25 +141,59 @@ function parseLinesJson(value: unknown): unknown {
   }
 }
 
-export const recordSaleSchema = z.object({
-  branch_id: requiredUuid,
-  customer_id: optionalUuid,
-  new_customer_name: optionalText,
-  new_customer_mobile: optionalText,
-  new_customer_email: optionalText,
-  sale_date: requiredDate,
-  or_no: optionalText,
-  csi_no: optionalText,
-  ci_no: optionalText,
-  referred_by: optionalText,
-  discount: nonNegativeNumber,
-  vat_amount: optionalNonNegativeNumber,
-  is_paid: booleanFromFormString,
-  lines: z.preprocess(
-    parseLinesJson,
-    z.array(saleLineSchema).min(1, "Add at least one line"),
-  ),
-});
+export const recordSaleSchema = z
+  .object({
+    branch_id: requiredUuid,
+    customer_id: optionalUuid,
+    new_customer_name: optionalText,
+    new_customer_mobile: optionalText,
+    new_customer_email: optionalText,
+    sale_date: requiredDate,
+    or_no: optionalText,
+    csi_no: optionalText,
+    ci_no: optionalText,
+    referred_by: optionalText,
+    // Discount templates replace the old free-text discount + manual VAT
+    // override: the server derives both the discount and VAT amounts from
+    // gross (lines total) + this template selection — see recordSale in
+    // actions.ts for the formulas. discount_percent/discount_amount are the
+    // raw operator inputs for the two "custom" templates only.
+    discount_type: discountTypeSchema,
+    discount_id_no: optionalText,
+    discount_percent: optionalPercent,
+    discount_amount: optionalNonNegativeNumber,
+    is_paid: booleanFromFormString,
+    lines: z.preprocess(
+      parseLinesJson,
+      z.array(saleLineSchema).min(1, "Add at least one line"),
+    ),
+  })
+  .superRefine((data, ctx) => {
+    if (
+      (data.discount_type === "senior_citizen" || data.discount_type === "pwd") &&
+      !data.discount_id_no
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "ID number is required for Senior Citizen / PWD discount",
+        path: ["discount_id_no"],
+      });
+    }
+    if (data.discount_type === "custom_percent" && data.discount_percent === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter a discount percentage",
+        path: ["discount_percent"],
+      });
+    }
+    if (data.discount_type === "custom_amount" && data.discount_amount === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter a discount amount",
+        path: ["discount_amount"],
+      });
+    }
+  });
 export type RecordSaleInput = z.infer<typeof recordSaleSchema>;
 
 export const returnSaleLineSchema = z.object({

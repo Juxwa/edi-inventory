@@ -9,6 +9,7 @@ import {
   type SaleActionState,
   type ReturnActionState,
   type SaleLineInput,
+  type RecordSaleInput,
 } from "@/lib/validators/sale";
 
 function firstIssueMessage(issues: { message: string }[]): string {
@@ -22,6 +23,48 @@ function rpcErrorMessage(error: PostgresErrorLike, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+// Rounds to 2dp for every stored/displayed amount, matching the sale form.
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+// Discount + VAT are always derived server-side from the lines total and the
+// chosen template — the client never gets to submit its own totals. Prices
+// are VAT-inclusive (12%). Formulas (PH RA 9994 / RA 10754 for SC/PWD):
+//   none            : discount = 0; vat = gross * 12/112
+//   senior_citizen,
+//   pwd             : vat_exempt_base = gross / 1.12
+//                      discount = vat_exempt_base * 0.20 (net payable = vat_exempt_base - discount)
+//                      vat = 0 (sale is VAT-exempt by law; enforced again in the RPC)
+//   custom_percent  : discount = gross * pct/100; vat = (gross - discount) * 12/112
+//   custom_amount   : discount = min(typed amount, gross); vat = (gross - discount) * 12/112
+function computeDiscountAndVat(
+  grossTotal: number,
+  discountType: RecordSaleInput["discount_type"],
+  discountPercent: number | null,
+  discountAmount: number | null,
+): { discount: number; vatAmount: number } {
+  switch (discountType) {
+    case "senior_citizen":
+    case "pwd": {
+      const vatExemptBase = grossTotal / 1.12;
+      return { discount: round2(vatExemptBase * 0.2), vatAmount: 0 };
+    }
+    case "custom_percent": {
+      const pct = (discountPercent ?? 0) / 100;
+      const discount = round2(grossTotal * pct);
+      return { discount, vatAmount: round2(((grossTotal - discount) * 12) / 112) };
+    }
+    case "custom_amount": {
+      const discount = round2(Math.min(discountAmount ?? 0, grossTotal));
+      return { discount, vatAmount: round2(((grossTotal - discount) * 12) / 112) };
+    }
+    case "none":
+    default:
+      return { discount: 0, vatAmount: round2((grossTotal * 12) / 112) };
+  }
 }
 
 export async function recordSale(
@@ -39,8 +82,10 @@ export async function recordSale(
     csi_no: formData.get("csi_no"),
     ci_no: formData.get("ci_no"),
     referred_by: formData.get("referred_by"),
-    discount: formData.get("discount"),
-    vat_amount: formData.get("vat_amount"),
+    discount_type: formData.get("discount_type"),
+    discount_id_no: formData.get("discount_id_no"),
+    discount_percent: formData.get("discount_percent"),
+    discount_amount: formData.get("discount_amount"),
     is_paid: formData.get("is_paid"),
     lines: formData.get("lines"),
   });
@@ -86,6 +131,17 @@ export async function recordSale(
     warranty_expiry: line.warranty_expiry ?? null,
   }));
 
+  const grossTotal = data.lines.reduce(
+    (sum: number, line: SaleLineInput) => sum + line.quantity * line.unit_price,
+    0,
+  );
+  const { discount, vatAmount } = computeDiscountAndVat(
+    grossTotal,
+    data.discount_type,
+    data.discount_percent,
+    data.discount_amount,
+  );
+
   const { data: saleId, error } = await supabase.rpc("sale_record", {
     p_customer_id: customerId,
     p_branch_id: data.branch_id,
@@ -94,10 +150,12 @@ export async function recordSale(
     p_csi_no: data.csi_no,
     p_ci_no: data.ci_no,
     p_referred_by: data.referred_by,
-    p_discount: data.discount,
-    p_vat_amount: data.vat_amount,
+    p_discount: discount,
+    p_vat_amount: vatAmount,
     p_is_paid: data.is_paid,
     p_lines: lines,
+    p_discount_type: data.discount_type,
+    p_discount_id_no: data.discount_id_no,
   });
 
   if (error || typeof saleId !== "string") {
