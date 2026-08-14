@@ -33,7 +33,7 @@ const NAV: NavSection[] = [
       {
         href: "/inventory",
         label: "Stock",
-        roles: ["admin", "branch_rep"],
+        roles: ["admin", "branch_rep", "technical"],
       },
       {
         href: "/inventory/intake",
@@ -93,12 +93,12 @@ const NAV: NavSection[] = [
       {
         href: "/transfers",
         label: "Transfers",
-        roles: ["admin", "branch_rep"],
+        roles: ["admin", "branch_rep", "technical"],
       },
       {
         href: "/requests",
         label: "Stock requests",
-        roles: ["admin", "branch_rep"],
+        roles: ["admin", "branch_rep", "technical"],
       },
     ],
   },

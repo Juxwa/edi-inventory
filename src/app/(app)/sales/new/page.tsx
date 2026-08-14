@@ -155,6 +155,7 @@ export default async function NewSalePage({ searchParams }: NewSalePageProps) {
             customers={customers}
             stockOptions={stockOptions}
             serviceOptions={serviceOptions}
+            role={profile.role}
           />
         ) : (
           <p className="text-sm text-muted-foreground">

@@ -79,7 +79,7 @@ export default async function TransferDetailPage({
   searchParams,
 }: TransferDetailPageProps) {
   const profile = await getProfile();
-  if (!profile || profile.role === "technical") {
+  if (!profile) {
     redirect("/");
   }
 

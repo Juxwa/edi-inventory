@@ -50,7 +50,7 @@ export default async function TransfersPage({
   searchParams,
 }: TransfersPageProps) {
   const profile = await getProfile();
-  if (!profile || profile.role === "technical") {
+  if (!profile) {
     redirect("/");
   }
   const params = await searchParams;

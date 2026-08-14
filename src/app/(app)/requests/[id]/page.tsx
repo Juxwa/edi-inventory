@@ -45,7 +45,7 @@ export default async function RequestDetailPage({
   params,
 }: RequestDetailPageProps) {
   const profile = await getProfile();
-  if (!profile || profile.role === "technical") {
+  if (!profile) {
     redirect("/");
   }
 

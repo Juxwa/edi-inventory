@@ -45,7 +45,7 @@ type RequestQueryRow = {
 
 export default async function RequestsPage({ searchParams }: RequestsPageProps) {
   const profile = await getProfile();
-  if (!profile || profile.role === "technical") {
+  if (!profile) {
     redirect("/");
   }
 
@@ -120,7 +120,10 @@ export default async function RequestsPage({ searchParams }: RequestsPageProps) 
     return `/requests?${next.toString()}`;
   }
 
-  const canCreate = profile.role === "admin" || profile.role === "branch_rep";
+  const canCreate =
+    profile.role === "admin" ||
+    profile.role === "branch_rep" ||
+    profile.role === "technical";
 
   return (
     <div className="flex flex-col gap-6">

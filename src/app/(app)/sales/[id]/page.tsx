@@ -37,6 +37,7 @@ type SaleDetailRow = {
   referred_by: string | null;
   discount: number | null;
   vat_amount: number | null;
+  vat_exempt: boolean | null;
   discount_type: DiscountType | null;
   discount_id_no: string | null;
   is_paid: boolean;
@@ -46,11 +47,12 @@ type SaleDetailRow = {
 };
 
 const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
-  none: "None",
-  senior_citizen: "Senior Citizen (20%)",
-  pwd: "PWD (20%)",
-  custom_percent: "Custom %",
-  custom_amount: "Custom amount",
+  none: "No discount",
+  final_price: "Final sale price",
+  custom_amount: "Discount amount",
+  custom_percent: "Discount %",
+  senior_citizen: "Senior Citizen 20%",
+  pwd: "PWD 20%",
 };
 
 type LineRow = {
@@ -115,7 +117,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const { data: sale, error: saleError } = await supabase
     .from("sales")
     .select(
-      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, vat_amount, discount_type, discount_id_no, is_paid, voided_at, voided_by, void_reason",
+      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, vat_amount, vat_exempt, discount_type, discount_id_no, is_paid, voided_at, voided_by, void_reason",
     )
     .eq("id", id)
     .single();
@@ -193,6 +195,9 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const vatExemptBase = Math.round((gross / 1.12) * 100) / 100;
   const vatExemptRemoved = Math.round((gross - vatExemptBase) * 100) / 100;
   const netPayable = isScOrPwd ? Math.max(0, vatExemptBase - discount) : net;
+  // vat_exempt is the authoritative flag (0049) — SC/PWD always sets it, but
+  // other modes can too (VAT-exempt checkbox on the sale form).
+  const isVatExempt = isScOrPwd || (saleRow.vat_exempt ?? false);
 
   const isVoided = saleRow.voided_at !== null;
   const canReturn =
@@ -292,6 +297,10 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
           <div>
             <p className="text-muted-foreground">Discount type</p>
             <p className="font-medium">{DISCOUNT_TYPE_LABELS[discountType]}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">VAT-exempt</p>
+            <p className="font-medium">{isVatExempt ? "Yes" : "No"}</p>
           </div>
           {isScOrPwd ? (
             <div>
@@ -432,13 +441,17 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
                 <span className="font-medium tabular-nums">{formatCurrency(discount)}</span>
               </div>
               <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
-                <span className="font-semibold">Net</span>
+                <span className="font-semibold">Final price</span>
                 <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
               </div>
               <div className="flex w-full max-w-xs items-center justify-between">
                 <span className="text-muted-foreground">VAT</span>
                 <span className="font-medium tabular-nums">
-                  {saleRow.vat_amount !== null ? formatCurrency(saleRow.vat_amount) : "—"}
+                  {isVatExempt
+                    ? "VAT-exempt"
+                    : saleRow.vat_amount !== null
+                      ? formatCurrency(saleRow.vat_amount)
+                      : "—"}
                 </span>
               </div>
               <div className="flex w-full max-w-xs items-center justify-between">

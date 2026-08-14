@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/supabase/profile";
 import {
   recordSaleSchema,
   returnSaleLineSchema,
@@ -32,38 +33,60 @@ function round2(value: number): number {
 
 // Discount + VAT are always derived server-side from the lines total and the
 // chosen template — the client never gets to submit its own totals. Prices
-// are VAT-inclusive (12%). Formulas (PH RA 9994 / RA 10754 for SC/PWD):
-//   none            : discount = 0; vat = gross * 12/112
+// are VAT-inclusive (12%). VAT is NEVER hand-typed: it's always final *
+// 12/112, or 0 when the sale is VAT-exempt. Formulas (PH RA 9994 / RA 10754
+// for SC/PWD):
+//   none            : discount = 0; final = gross
+//   final_price     : final = declared amount (caller must reject final >
+//                      gross with "final price exceeds item total" BEFORE
+//                      calling this — grossTotal isn't known to the caller
+//                      until lines are summed); discount = gross - final
 //   senior_citizen,
 //   pwd             : vat_exempt_base = gross / 1.12
 //                      discount = vat_exempt_base * 0.20 (net payable = vat_exempt_base - discount)
-//                      vat = 0 (sale is VAT-exempt by law; enforced again in the RPC)
-//   custom_percent  : discount = gross * pct/100; vat = (gross - discount) * 12/112
-//   custom_amount   : discount = min(typed amount, gross); vat = (gross - discount) * 12/112
+//                      always VAT-exempt (enforced again in the RPC)
+//   custom_percent  : discount = gross * pct/100; final = gross - discount
+//   custom_amount   : discount = min(typed amount, gross); final = gross - discount
+// vat = vatExempt ? 0 : final * 12/112 for every mode except SC/PWD, which is
+// always VAT-exempt regardless of the vatExempt argument.
 function computeDiscountAndVat(
   grossTotal: number,
   discountType: RecordSaleInput["discount_type"],
   discountPercent: number | null,
   discountAmount: number | null,
-): { discount: number; vatAmount: number } {
+  finalPrice: number | null,
+  vatExempt: boolean,
+): { discount: number; vatAmount: number; vatExempt: boolean } {
   switch (discountType) {
     case "senior_citizen":
     case "pwd": {
       const vatExemptBase = grossTotal / 1.12;
-      return { discount: round2(vatExemptBase * 0.2), vatAmount: 0 };
+      return { discount: round2(vatExemptBase * 0.2), vatAmount: 0, vatExempt: true };
+    }
+    case "final_price": {
+      const final = Math.min(finalPrice ?? 0, grossTotal);
+      const discount = round2(Math.max(0, grossTotal - final));
+      const vatAmount = vatExempt ? 0 : round2((final * 12) / 112);
+      return { discount, vatAmount, vatExempt };
     }
     case "custom_percent": {
       const pct = (discountPercent ?? 0) / 100;
       const discount = round2(grossTotal * pct);
-      return { discount, vatAmount: round2(((grossTotal - discount) * 12) / 112) };
+      const final = grossTotal - discount;
+      const vatAmount = vatExempt ? 0 : round2((final * 12) / 112);
+      return { discount, vatAmount, vatExempt };
     }
     case "custom_amount": {
       const discount = round2(Math.min(discountAmount ?? 0, grossTotal));
-      return { discount, vatAmount: round2(((grossTotal - discount) * 12) / 112) };
+      const final = grossTotal - discount;
+      const vatAmount = vatExempt ? 0 : round2((final * 12) / 112);
+      return { discount, vatAmount, vatExempt };
     }
     case "none":
-    default:
-      return { discount: 0, vatAmount: round2((grossTotal * 12) / 112) };
+    default: {
+      const vatAmount = vatExempt ? 0 : round2((grossTotal * 12) / 112);
+      return { discount: 0, vatAmount, vatExempt };
+    }
   }
 }
 
@@ -86,6 +109,8 @@ export async function recordSale(
     discount_id_no: formData.get("discount_id_no"),
     discount_percent: formData.get("discount_percent"),
     discount_amount: formData.get("discount_amount"),
+    final_price: formData.get("final_price"),
+    vat_exempt: formData.get("vat_exempt"),
     is_paid: formData.get("is_paid"),
     lines: formData.get("lines"),
   });
@@ -98,6 +123,11 @@ export async function recordSale(
 
   if (!data.customer_id && !data.new_customer_name) {
     return { ok: false, error: "Select a customer or enter a new customer name." };
+  }
+
+  const profile = await getProfile();
+  if (!profile) {
+    return { ok: false, error: "Not authenticated." };
   }
 
   const supabase = await createClient();
@@ -122,7 +152,16 @@ export async function recordSale(
     customerId = customer.id;
   }
 
-  const lines = data.lines.map((line: SaleLineInput) => ({
+  type PreparedLine = {
+    line_type: "stock" | "service";
+    stock_id: string | null;
+    service_id: string | null;
+    quantity: number;
+    unit_price: number;
+    warranty_expiry: string | null;
+  };
+
+  const lines: PreparedLine[] = data.lines.map((line: SaleLineInput) => ({
     line_type: line.line_type,
     stock_id: line.line_type === "stock" ? line.stock_id : null,
     service_id: line.line_type === "service" ? line.service_id : null,
@@ -131,15 +170,95 @@ export async function recordSale(
     warranty_expiry: line.warranty_expiry ?? null,
   }));
 
-  const grossTotal = data.lines.reduce(
-    (sum: number, line: SaleLineInput) => sum + line.quantity * line.unit_price,
+  // Line prices = SRP from the system. branch_rep cannot edit unit_price —
+  // the client already disables the input, but that's UI-only, so the
+  // server re-derives every line's price from products.srp / service_pricing
+  // for this role and overwrites whatever was submitted. Admin (and other
+  // roles) stay trusted to submit their own line prices.
+  if (profile.role === "branch_rep") {
+    const stockIds = lines
+      .filter((line: PreparedLine) => line.line_type === "stock" && line.stock_id)
+      .map((line: PreparedLine) => line.stock_id as string);
+    const serviceIds = lines
+      .filter((line: PreparedLine) => line.line_type === "service" && line.service_id)
+      .map((line: PreparedLine) => line.service_id as string);
+
+    const [stockResult, servicePricingResult] = await Promise.all([
+      stockIds.length > 0
+        ? supabase.from("stock").select("id, product_id").in("id", stockIds)
+        : Promise.resolve({ data: [] as { id: string; product_id: string }[] }),
+      serviceIds.length > 0
+        ? supabase
+            .from("service_pricing")
+            .select("service_id, price")
+            .eq("branch_id", data.branch_id)
+            .in("service_id", serviceIds)
+        : Promise.resolve({ data: [] as { service_id: string; price: number }[] }),
+    ]);
+
+    type StockRow = { id: string; product_id: string };
+    const stockRows: StockRow[] = (stockResult.data as StockRow[] | null) ?? [];
+    const productIdByStockId = new Map<string, string>(
+      stockRows.map((row: StockRow) => [row.id, row.product_id]),
+    );
+    const productIds: string[] = Array.from(
+      new Set(stockRows.map((row: StockRow) => row.product_id)),
+    );
+
+    const productsResult =
+      productIds.length > 0
+        ? await supabase.from("products").select("id, srp").in("id", productIds)
+        : { data: [] as { id: string; srp: number | null }[] };
+    type ProductRow = { id: string; srp: number | null };
+    const srpByProductId = new Map<string, number | null>(
+      ((productsResult.data as ProductRow[] | null) ?? []).map((row: ProductRow) => [
+        row.id,
+        row.srp,
+      ]),
+    );
+
+    type PricingRow = { service_id: string; price: number };
+    const priceByServiceId = new Map<string, number>(
+      ((servicePricingResult.data as PricingRow[] | null) ?? []).map((row: PricingRow) => [
+        row.service_id,
+        row.price,
+      ]),
+    );
+
+    for (const line of lines) {
+      if (line.line_type === "stock" && line.stock_id) {
+        const productId = productIdByStockId.get(line.stock_id);
+        const srp = productId ? srpByProductId.get(productId) : null;
+        line.unit_price = srp ?? 0;
+      } else if (line.line_type === "service" && line.service_id) {
+        line.unit_price = priceByServiceId.get(line.service_id) ?? 0;
+      }
+    }
+  }
+
+  const grossTotal = lines.reduce(
+    (sum: number, line: PreparedLine) => sum + line.quantity * line.unit_price,
     0,
   );
-  const { discount, vatAmount } = computeDiscountAndVat(
+
+  if (data.discount_type === "final_price") {
+    const finalPrice = data.final_price ?? 0;
+    // Small epsilon for floating-point line-total sums.
+    if (finalPrice - grossTotal > 0.005) {
+      return { ok: false, error: "final price exceeds item total" };
+    }
+  }
+
+  const isScOrPwd = data.discount_type === "senior_citizen" || data.discount_type === "pwd";
+  const effectiveVatExempt = isScOrPwd ? true : data.vat_exempt;
+
+  const { discount, vatAmount, vatExempt } = computeDiscountAndVat(
     grossTotal,
     data.discount_type,
     data.discount_percent,
     data.discount_amount,
+    data.final_price,
+    effectiveVatExempt,
   );
 
   const { data: saleId, error } = await supabase.rpc("sale_record", {
@@ -156,6 +275,7 @@ export async function recordSale(
     p_lines: lines,
     p_discount_type: data.discount_type,
     p_discount_id_no: data.discount_id_no,
+    p_vat_exempt: vatExempt,
   });
 
   if (error || typeof saleId !== "string") {

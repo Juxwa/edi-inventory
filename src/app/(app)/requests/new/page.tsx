@@ -11,7 +11,12 @@ export const dynamic = "force-dynamic";
 
 export default async function NewRequestPage() {
   const profile = await getProfile();
-  if (!profile || (profile.role !== "admin" && profile.role !== "branch_rep")) {
+  if (
+    !profile ||
+    (profile.role !== "admin" &&
+      profile.role !== "branch_rep" &&
+      profile.role !== "technical")
+  ) {
     redirect("/");
   }
 
@@ -29,7 +34,10 @@ export default async function NewRequestPage() {
   const products: RequestProductOption[] = productsResult.data ?? [];
   const branches: RequestBranchOption[] = branchesResult.data ?? [];
 
-  const lockedBranchId = profile.role === "branch_rep" ? profile.branch_id : null;
+  const lockedBranchId =
+    profile.role === "branch_rep" || profile.role === "technical"
+      ? profile.branch_id
+      : null;
 
   return (
     <div className="flex flex-col gap-6">

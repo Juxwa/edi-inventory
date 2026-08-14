@@ -86,11 +86,12 @@ function round2(value: number): number {
 }
 
 const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
-  none: "None",
-  senior_citizen: "Senior Citizen (20%)",
-  pwd: "PWD (20%)",
-  custom_percent: "Custom %",
-  custom_amount: "Custom amount",
+  none: "No discount",
+  final_price: "Final sale price",
+  custom_amount: "Discount amount",
+  custom_percent: "Discount %",
+  senior_citizen: "Senior Citizen 20%",
+  pwd: "PWD 20%",
 };
 
 function CustomerPicker({
@@ -316,17 +317,26 @@ export function SaleForm({
   customers,
   stockOptions,
   serviceOptions,
+  role,
 }: {
   branches: { id: string; name: string }[];
   lockedBranchId: string | null;
   customers: SaleCustomerOption[];
   stockOptions: SaleStockOption[];
   serviceOptions: SaleServiceOption[];
+  role: "admin" | "branch_rep" | "top_mgmt" | "technical";
 }) {
   const [state, formAction, pending] = useActionState<
     SaleActionState,
     FormData
   >(recordSale, initialSaleState);
+
+  // Branch reps sell at SRP only — line prices pre-fill from products.srp /
+  // service_pricing (see handleAddStock/handleAddService below) and are
+  // read-only here. Admin may still edit line prices. The server re-derives
+  // prices from SRP for branch_rep regardless of what's submitted (see
+  // recordSale in actions.ts) — this is UI convenience, not the trust boundary.
+  const linePricesLocked = role === "branch_rep";
 
   const [selectedCustomer, setSelectedCustomer] =
     useState<SaleCustomerOption | null>(null);
@@ -336,6 +346,8 @@ export function SaleForm({
   const [discountIdNo, setDiscountIdNo] = useState("");
   const [discountPercent, setDiscountPercent] = useState("");
   const [discountAmount, setDiscountAmount] = useState("");
+  const [finalPrice, setFinalPrice] = useState("");
+  const [vatExempt, setVatExempt] = useState(false);
   const [serviceSelectValue, setServiceSelectValue] = useState<string>("");
 
   useEffect(() => {
@@ -343,6 +355,14 @@ export function SaleForm({
       toast.error(state.error);
     }
   }, [state]);
+
+  const isScOrPwd = discountType === "senior_citizen" || discountType === "pwd";
+
+  // VAT-exempt is auto-checked AND locked whenever SC/PWD is selected — those
+  // discounts are always VAT-exempt by law (RA 9994 / RA 10754).
+  useEffect(() => {
+    if (isScOrPwd) setVatExempt(true);
+  }, [isScOrPwd]);
 
   const lockedBranch = branches.find(
     (branch: { id: string; name: string }) => branch.id === lockedBranchId,
@@ -422,34 +442,40 @@ export function SaleForm({
 
   // Mirrors the server-side formulas in sales/actions.ts (computeDiscountAndVat) —
   // this is display-only; the server recomputes from the submitted lines and
-  // never trusts these client totals. Prices are VAT-inclusive (12%).
+  // never trusts these client totals. Prices are VAT-inclusive (12%). VAT is
+  // never hand-typed: it's always derived from the final price, or 0 when the
+  // sale is VAT-exempt.
   const discountPercentValue = Number.parseFloat(discountPercent) || 0;
   const discountAmountValue = Number.parseFloat(discountAmount) || 0;
-  const isScOrPwd = discountType === "senior_citizen" || discountType === "pwd";
+  const finalPriceValue = Number.parseFloat(finalPrice) || 0;
 
-  const vatExemptBase = round2(gross / 1.12);
-  const vatExemptRemoved = round2(gross - vatExemptBase);
+  // SC/PWD is always VAT-exempt regardless of the checkbox state (which is
+  // locked+on for these modes anyway).
+  const effectiveVatExempt = vatExempt || isScOrPwd;
 
   let discountValue = 0;
-  let vatValue = 0;
+  let finalValue = 0;
   if (isScOrPwd) {
+    const vatExemptBase = round2(gross / 1.12);
     discountValue = round2(vatExemptBase * 0.2);
-    vatValue = 0;
+    finalValue = Math.max(0, round2(vatExemptBase - discountValue));
+  } else if (discountType === "final_price") {
+    finalValue = Math.min(finalPriceValue, gross);
+    discountValue = round2(Math.max(0, gross - finalValue));
   } else if (discountType === "custom_percent") {
     discountValue = round2(gross * (discountPercentValue / 100));
-    vatValue = round2(((gross - discountValue) * 12) / 112);
+    finalValue = Math.max(0, round2(gross - discountValue));
   } else if (discountType === "custom_amount") {
     discountValue = round2(Math.min(discountAmountValue, gross));
-    vatValue = round2(((gross - discountValue) * 12) / 112);
+    finalValue = Math.max(0, round2(gross - discountValue));
   } else {
     discountValue = 0;
-    vatValue = round2((gross * 12) / 112);
+    finalValue = gross;
   }
 
-  const net = Math.max(0, gross - discountValue);
-  const netOfVat = Math.max(0, net - vatValue);
-  const netPayable = isScOrPwd ? Math.max(0, vatExemptBase - discountValue) : net;
+  const vatValue = effectiveVatExempt ? 0 : round2((finalValue * 12) / 112);
   const discountExceedsGross = discountType === "custom_amount" && discountAmountValue > gross;
+  const finalExceedsGross = discountType === "final_price" && finalPriceValue > gross;
 
   const linesJson = useMemo(
     () =>
@@ -640,7 +666,8 @@ export function SaleForm({
                           min="0"
                           step="0.01"
                           value={line.unit_price}
-                          disabled={pending}
+                          disabled={pending || linePricesLocked}
+                          title={linePricesLocked ? "SRP — locked" : undefined}
                           onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                             handleLineChange(line.key, "unit_price", event.target.value)
                           }
@@ -714,6 +741,30 @@ export function SaleForm({
             </div>
           ) : null}
 
+          {discountType === "final_price" ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="final_price">Final sale price (from receipt)</Label>
+              <Input
+                id="final_price"
+                name="final_price"
+                type="number"
+                min="0"
+                step="0.01"
+                disabled={pending}
+                value={finalPrice}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                  setFinalPrice(event.target.value)
+                }
+                className="w-28"
+              />
+              {finalExceedsGross ? (
+                <p className="text-xs font-medium text-destructive">
+                  Final price exceeds item total ({formatCurrency(gross)}).
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           {discountType === "custom_percent" ? (
             <div className="grid gap-1.5">
               <Label htmlFor="discount_percent">Discount %</Label>
@@ -759,59 +810,49 @@ export function SaleForm({
           ) : null}
         </div>
 
-        {isScOrPwd ? (
-          <div className="flex flex-col items-end gap-2 text-sm">
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Gross (VAT-inc)</span>
-              <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Less: VAT (exempt)</span>
-              <span className="font-medium tabular-nums">
-                -{formatCurrency(vatExemptRemoved)}
-              </span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
-              <span className="text-muted-foreground">VAT-exempt sale</span>
-              <span className="font-medium tabular-nums">{formatCurrency(vatExemptBase)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Less: 20% discount</span>
-              <span className="font-medium tabular-nums">-{formatCurrency(discountValue)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
-              <span className="font-semibold">Net payable</span>
-              <span className="font-semibold tabular-nums">{formatCurrency(netPayable)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">VAT recorded</span>
-              <span className="font-medium tabular-nums">{formatCurrency(0)}</span>
-            </div>
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            name="vat_exempt"
+            value="true"
+            checked={vatExempt}
+            disabled={pending || isScOrPwd}
+            onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+              setVatExempt(event.target.checked)
+            }
+            className="size-4 rounded border-input"
+          />
+          VAT-exempt sale
+          {isScOrPwd ? (
+            <span className="text-xs font-normal text-muted-foreground">
+              (locked on — Senior Citizen / PWD sales are always VAT-exempt)
+            </span>
+          ) : null}
+        </label>
+
+        {/* Live breakdown — recomputes as lines/mode/inputs change. Server
+            recomputes the authoritative values from lines + mode + declared
+            number; this is display-only. */}
+        <div className="flex flex-col items-end gap-2 text-sm">
+          <div className="flex w-full max-w-xs items-center justify-between">
+            <span className="text-muted-foreground">Items total (SRP)</span>
+            <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
           </div>
-        ) : (
-          <div className="flex flex-col items-end gap-2 text-sm">
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Gross</span>
-              <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Discount</span>
-              <span className="font-medium tabular-nums">{formatCurrency(discountValue)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
-              <span className="font-semibold">Net</span>
-              <span className="font-semibold tabular-nums">{formatCurrency(net)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">VAT (12/112, informational)</span>
-              <span className="font-medium tabular-nums">{formatCurrency(vatValue)}</span>
-            </div>
-            <div className="flex w-full max-w-xs items-center justify-between">
-              <span className="text-muted-foreground">Net of VAT</span>
-              <span className="font-medium tabular-nums">{formatCurrency(netOfVat)}</span>
-            </div>
+          <div className="flex w-full max-w-xs items-center justify-between">
+            <span className="text-muted-foreground">Discount</span>
+            <span className="font-medium tabular-nums">-{formatCurrency(discountValue)}</span>
           </div>
-        )}
+          <div className="flex w-full max-w-xs items-center justify-between border-t border-border pt-2">
+            <span className="font-semibold">Final price</span>
+            <span className="font-semibold tabular-nums">{formatCurrency(finalValue)}</span>
+          </div>
+          <div className="flex w-full max-w-xs items-center justify-between">
+            <span className="text-muted-foreground">VAT</span>
+            <span className="font-medium tabular-nums">
+              {effectiveVatExempt ? "VAT-exempt" : formatCurrency(vatValue)}
+            </span>
+          </div>
+        </div>
       </div>
 
       {state.error ? (

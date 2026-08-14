@@ -950,3 +950,55 @@ Watch particularly for:
 - **Custom amount sale:** Discount = "Custom amount", type an amount larger than gross — confirm the "will be clamped" warning appears and the recorded discount clamps to gross (net = ₱0.00) after submit.
 - **None (unchanged behavior):** Discount = "None" (the default) — confirm no discount fields appear, VAT auto-computes at 12/112 of gross exactly like before this change, and the detail page shows Discount ₱0.00, Discount type "None".
 - **CSV export:** from `/sales`, export CSV — confirm "Discount type" and "Discount ID no." columns appear right after "Discount", populated only on each sale's first exported line (blank on subsequent lines of a multi-line sale), and that a Senior Citizen sale's row shows "senior_citizen" + the ID number typed above.
+
+# Sale money modes — SRP-locked lines, final-price entry, explicit VAT-exempt (2026-08-13)
+
+Built with Read/Write/Edit/Grep only (bash unavailable, Glob avoided for `(app)` paths). **Not compiled or run locally.** Migration used: `0049_sale_money_modes.sql` (0048 already existed — `intake_perf` — so this is the next free number).
+
+## 1. Push migration 0049
+
+```powershell
+npx supabase db push -p "<db password from .env.local>"
+```
+
+Expected: `0049_sale_money_modes.sql` applies cleanly. It adds `sales.vat_exempt boolean not null default false`, extends the `sales_discount_type_check` constraint to include `'final_price'` (drop + re-add, existing rows unaffected — all five 0047 values stay valid), then drops and recreates `sale_record(...)` with one new trailing param: `p_vat_exempt boolean default false`. SC/PWD sales now also require `p_vat_exempt = true` (raises `'SC/PWD discount sales must be marked VAT-exempt'` otherwise) on top of the existing ID-required + VAT-must-be-zero checks; a general safety net also rejects any sale where `p_vat_exempt = true` but `p_vat_amount <> 0`. Verify in the dashboard: Table Editor → `sales` has the new `vat_exempt` column; Database → Functions → `sale_record` shows the extended 14-arg signature (old 13-arg one from 0047 gone).
+
+## 2. Build
+
+```powershell
+npm run build
+```
+
+Watch particularly for:
+- Same loosely-typed-RPC caveat as 0047 — no generated `Database` type exists, so `p_vat_exempt` and the new `vat_exempt`/`final_price` column/field references only fail at runtime if misspelled.
+- `src/lib/validators/sale.ts`'s `DISCOUNT_TYPES` was **reordered** (client-requested Select order: none / final_price / custom_amount / custom_percent / senior_citizen / pwd) and gained `'final_price'`. Two new schema fields: `final_price` (nullable number, required via `.superRefine()` when `discount_type === 'final_price'`) and `vat_exempt` (boolean, defaults false from an absent/unchecked form checkbox).
+- `src/app/(app)/sales/actions.ts`'s `computeDiscountAndVat()` gained two params (`finalPrice`, `vatExempt`) and now returns `vatExempt` too (SC/PWD forces it true in the return regardless of the input). `recordSale` now: (a) fetches the caller's profile and, for `branch_rep`, re-derives every line's `unit_price` from `products.srp` (stock lines, via the line's `stock_id` → `stock.product_id` → `products.srp`) or `service_pricing` (service lines, by `service_id` + the sale's `branch_id`) — overwriting whatever the client submitted, since the client-side input lock is UI-only; (b) computes `grossTotal` from those (possibly overwritten) lines, not the raw submission; (c) for `final_price` mode, rejects with the exact string `'final price exceeds item total'` if the declared final price exceeds gross (0.005 epsilon for float sums) — server-side, before the RPC is ever called; (d) forces `effectiveVatExempt = true` whenever `discount_type` is `senior_citizen`/`pwd`, otherwise passes through the submitted checkbox value; (e) passes the computed `vatExempt` as `p_vat_exempt` to the RPC.
+- `src/components/sales/sale-form.tsx` gained a `role` prop (threaded from `profile.role` in `sales/new/page.tsx`) — the unit-price `Input` on each line is `disabled` when `role === 'branch_rep'` (UI convenience only; the server is the real trust boundary, see above). The breakdown box was unified into one four-row layout regardless of mode (Items total (SRP) → Discount → Final price → VAT), with a "VAT-exempt sale" checkbox rendered between the discount fields and the breakdown — checked+disabled automatically whenever Senior Citizen/PWD is selected (`useEffect` on `isScOrPwd`), otherwise a plain toggle. The VAT row shows the literal text "VAT-exempt" instead of ₱0.00 whenever exempt, so a genuinely-zero-VAT sale and an exempt sale never look identical.
+
+## 3. What was built
+
+- **Math per mode, prices are VAT-inclusive 12%. VAT is never hand-typed** — it's always derived (`final × 12/112`, or 0 when exempt):
+  - `none` — discount = 0; final = gross.
+  - `final_price` (**new**) — final = the rep's typed receipt amount (server rejects final > gross before it ever reaches the RPC); discount = gross − final, clamped ≥ 0.
+  - `senior_citizen` / `pwd` — **unchanged from 0047**: `vat_exempt_base = gross / 1.12`; discount = `vat_exempt_base × 0.20`; net payable = `vat_exempt_base − discount`; always VAT-exempt (now also sets the explicit `vat_exempt` column, not just `vat_amount = 0`); requires an SC/PWD ID number.
+  - `custom_percent` — discount = gross × pct/100; final = gross − discount.
+  - `custom_amount` — discount = min(typed amount, gross); final = gross − discount.
+  - Every amount rounds to 2dp both client-side (display) and server-side (values sent to the RPC).
+- **Why `vat_exempt` is its own column:** previously VAT-exempt could only be inferred from `vat_amount = 0`, which is ambiguous — a real (tiny, VAT-inclusive) sale can also round to ₱0.00 VAT. The new boolean makes "this sale is legally VAT-exempt" an explicit, queryable fact instead of an inference.
+- **Line prices = SRP, locked for branch_rep:** `sale-form.tsx` already pre-filled `unit_price` from the `srp`/`service_pricing` maps the page passes in (`sales/new/page.tsx` — unchanged, this data flow existed before); the change is that branch_rep can no longer edit it (disabled input) and, more importantly, the server now re-derives it from the same source tables regardless of what's submitted for that role. Admin keeps full edit rights, client- and server-side.
+- **Verification example (client-final spec):** gross ₱2,240.00, rep types final sale price ₱2,000.00 → discount = ₱240.00, VAT = `2000 × 12/112 = 214.29`. Same sale with "VAT-exempt sale" checked → VAT = ₱0.00 (discount unchanged at ₱240.00, final unchanged at ₱2,000.00).
+- **Sale form** (`src/components/sales/sale-form.tsx`): Discount `Select` labels now read "No discount / Final sale price / Discount amount / Discount % / Senior Citizen 20% / PWD 20%" (renamed + reordered from 0047's "None / Senior Citizen (20%) / PWD (20%) / Custom % / Custom amount"). "Final sale price (from receipt)" is a single number input shown only in `final_price` mode, with a "Final price exceeds item total" warning (mirrors the server's rejection message) if the typed value is above gross.
+- **Server action** (`src/app/(app)/sales/actions.ts`): see the build-loop notes above for the full branch_rep price-lock + final-price rejection + vat_exempt plumbing.
+- **Sale detail page** (`src/app/(app)/sales/[id]/page.tsx`): Details card gains a "VAT-exempt" Yes/No row; `DISCOUNT_TYPE_LABELS` updated to the new label set (compile-enforced — `Record<DiscountType, string>` requires every key, including `final_price`); the non-SC/PWD totals block's "Net" row is relabeled "Final price" and its VAT row shows "VAT-exempt" instead of a peso amount when `vat_exempt` is true (or when SC/PWD, as before).
+- **CSV export** (`src/app/(app)/sales/export/route.ts`): "VAT-exempt" column added after "Discount ID no." (same per-sale-first-line-only convention — "yes"/"no", blank on subsequent lines of a multi-line sale).
+- **Not touched (deliberately):** `sales_totals` view (0014) and reports/analytics — same rationale as 0047's note: those generic views don't know about `vat_exempt` or `final_price` and were out of scope here. Import scripts and `tests/sales-vat.test.ts` call `sale_record` without the new trailing params, which is fine — `p_discount_type`, `p_discount_id_no`, and `p_vat_exempt` all default (`'none'`, `null`, `false`), so existing calls behave exactly as before.
+
+## 4. Manual checklist
+
+- **Branch rep price lock:** log in (or view-as) a branch_rep, start a new sale, add a stock line — confirm the unit-price input is greyed out/disabled and pre-filled from SRP. Try editing it via devtools (change the disabled attribute) and submit anyway — confirm the recorded sale's line price on the detail page still matches the product's SRP, not the tampered value (proves the server-side recompute, not just the UI lock).
+- **Admin price edit (regression):** as admin, confirm the unit-price input is still editable and a changed price is honored on submit.
+- **Final-price mode math:** add lines totaling ₱2,240.00 gross, select "Final sale price", type ₱2,000.00 — confirm the breakdown reads Items total ₱2,240.00 → Discount −₱240.00 → Final price ₱2,000.00 → VAT ₱214.29. Submit and confirm the detail page matches (Discount ₱240.00, Discount type "Final sale price").
+- **Final-price over gross (rejection):** same lines, type a final price above ₱2,240.00 — confirm the inline warning appears client-side, and confirm submission is rejected server-side with "final price exceeds item total" (try bypassing the client validation via devtools if needed to prove the server check, not just the client one).
+- **VAT-exempt toggle:** repeat the ₱2,000.00 final-price sale with "VAT-exempt sale" checked — confirm VAT shows "VAT-exempt" (not ₱0.00-as-a-number) in the live breakdown, and on the detail page the VAT row reads "VAT-exempt" and the new "VAT-exempt" detail field reads "Yes".
+- **SC/PWD regression:** record a Senior Citizen sale as before (0047's checklist) — confirm the ID-number field, the math, and the breakdown are unchanged, and confirm the "VAT-exempt sale" checkbox is auto-checked and disabled (can't be unchecked) the moment Senior Citizen/PWD is selected.
+- **CSV export:** from `/sales`, export CSV — confirm a "VAT-exempt" column appears after "Discount ID no." reading "yes"/"no", populated only on each sale's first exported line, matching what the detail page shows for the same sale.

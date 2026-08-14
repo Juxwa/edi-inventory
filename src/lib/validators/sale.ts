@@ -85,15 +85,20 @@ export const LINE_TYPES = ["stock", "service"] as const;
 export type LineType = (typeof LINE_TYPES)[number];
 
 // PH discount templates (RA 9994 Senior Citizen / RA 10754 PWD 20%
-// VAT-exempt discount, plus free-form custom templates). "none" is the
-// default — plain text on the DB side (not an enum) so future templates
-// don't need a migration; validated here instead.
+// VAT-exempt discount, plus free-form custom templates, plus "final_price"
+// where the rep types the receipt's final sale price and discount is
+// derived). "none" is the default — plain text on the DB side (not an enum)
+// so future templates don't need a migration; validated here instead. Order
+// matches the client-requested Select order (rule 2 of the money-entry
+// rework): No discount / Final sale price / Discount amount / Discount % /
+// Senior Citizen 20% / PWD 20%.
 export const DISCOUNT_TYPES = [
   "none",
+  "final_price",
+  "custom_amount",
+  "custom_percent",
   "senior_citizen",
   "pwd",
-  "custom_percent",
-  "custom_amount",
 ] as const;
 export type DiscountType = (typeof DISCOUNT_TYPES)[number];
 
@@ -162,6 +167,15 @@ export const recordSaleSchema = z
     discount_id_no: optionalText,
     discount_percent: optionalPercent,
     discount_amount: optionalNonNegativeNumber,
+    // Raw operator input for "final_price" mode — the receipt's final sale
+    // price. Discount is derived server-side (gross - final); final > gross
+    // is rejected in the action, not here (gross isn't known until lines are
+    // summed there).
+    final_price: optionalNonNegativeNumber,
+    // Always auto-computed server-side when unchecked; this only carries the
+    // "VAT-exempt sale" checkbox. SC/PWD forces it true server-side
+    // regardless of what's submitted (the checkbox is locked+on in the UI).
+    vat_exempt: booleanFromFormString,
     is_paid: booleanFromFormString,
     lines: z.preprocess(
       parseLinesJson,
@@ -191,6 +205,13 @@ export const recordSaleSchema = z
         code: z.ZodIssueCode.custom,
         message: "Enter a discount amount",
         path: ["discount_amount"],
+      });
+    }
+    if (data.discount_type === "final_price" && data.final_price === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Enter the final sale price",
+        path: ["final_price"],
       });
     }
   });
