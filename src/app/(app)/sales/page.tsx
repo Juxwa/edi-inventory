@@ -36,6 +36,8 @@ type SaleQueryRow = {
   id: string;
   sale_date: string;
   or_no: string | null;
+  csi_no: string | null;
+  ci_no: string | null;
   customer_id: string | null;
   branch_id: string;
   discount: number | null;
@@ -98,7 +100,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
 
   let query = supabase
     .from("sales")
-    .select("id, sale_date, or_no, customer_id, branch_id, discount, is_paid", {
+    .select("id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, discount, is_paid", {
       count: "exact",
     })
     .is("voided_at", null)
@@ -112,11 +114,11 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
 
   if (q) {
     const idList = matchingSaleIds ?? [];
-    const orNoFilter = `or_no.ilike.%${q}%`;
+    const receiptNoFilter = `or_no.ilike.%${q}%,csi_no.ilike.%${q}%,ci_no.ilike.%${q}%`;
     if (idList.length > 0) {
-      query = query.or(`${orNoFilter},id.in.(${idList.join(",")})`);
+      query = query.or(`${receiptNoFilter},id.in.(${idList.join(",")})`);
     } else {
-      query = query.or(orNoFilter);
+      query = query.or(receiptNoFilter);
     }
   }
 
@@ -212,6 +214,8 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
       id: row.id,
       sale_date: row.sale_date,
       or_no: row.or_no,
+      csi_no: row.csi_no,
+      ci_no: row.ci_no,
       customer_name: row.customer_id
         ? (customerNameById.get(row.customer_id) ?? "—")
         : "Walk-in",

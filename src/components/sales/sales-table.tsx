@@ -20,6 +20,8 @@ export type SalesRowData = {
   id: string;
   sale_date: string;
   or_no: string | null;
+  csi_no: string | null;
+  ci_no: string | null;
   customer_name: string;
   branch_name: string;
   lines: SalesLineData[];
@@ -62,6 +64,8 @@ export function SalesTable({ rows }: { rows: SalesRowData[] }) {
           <TableRow>
             <TableHead>Date</TableHead>
             <TableHead>OR no.</TableHead>
+            <TableHead>CSI no.</TableHead>
+            <TableHead>CI no.</TableHead>
             <TableHead>Customer</TableHead>
             <TableHead>Branch</TableHead>
             <TableHead>Product</TableHead>
@@ -81,6 +85,8 @@ export function SalesTable({ rows }: { rows: SalesRowData[] }) {
                 </Link>
               </TableCell>
               <TableCell>{row.or_no ?? "—"}</TableCell>
+              <TableCell>{row.csi_no ?? "—"}</TableCell>
+              <TableCell>{row.ci_no ?? "—"}</TableCell>
               <TableCell>{row.customer_name}</TableCell>
               <TableCell>{row.branch_name}</TableCell>
               <TableCell>
