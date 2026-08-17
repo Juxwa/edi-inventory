@@ -11,6 +11,7 @@ import {
   repairVoidSchema,
   earmoldVoidSchema,
   stockEditSchema,
+  saleEditSchema,
   type CorrectionActionState,
 } from "@/lib/validators/correction";
 
@@ -236,6 +237,50 @@ export async function editStock(
   }
 
   revalidatePath("/inventory");
+  revalidatePath("/admin/corrections");
+  return { ok: true };
+}
+
+export async function editSale(
+  _prevState: CorrectionActionState,
+  formData: FormData,
+): Promise<CorrectionActionState> {
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
+  const parsed = saleEditSchema.safeParse({
+    sale_id: formData.get("sale_id"),
+    or_no: formData.get("or_no"),
+    csi_no: formData.get("csi_no"),
+    ci_no: formData.get("ci_no"),
+    sale_date: formData.get("sale_date"),
+    customer_id: formData.get("customer_id"),
+    referred_by: formData.get("referred_by"),
+    is_paid: formData.get("is_paid") === "on",
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) {
+    return { ok: false, error: firstIssueMessage(parsed.error.issues) };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("sale_edit", {
+    p_sale_id: parsed.data.sale_id,
+    p_or_no: parsed.data.or_no,
+    p_csi_no: parsed.data.csi_no,
+    p_ci_no: parsed.data.ci_no,
+    p_sale_date: parsed.data.sale_date,
+    p_customer_id: parsed.data.customer_id,
+    p_referred_by: parsed.data.referred_by,
+    p_is_paid: parsed.data.is_paid,
+    p_reason: parsed.data.reason,
+  });
+  if (error) {
+    return { ok: false, error: rpcErrorMessage(error, "Could not edit sale.") };
+  }
+
+  revalidatePath(`/sales/${parsed.data.sale_id}`);
+  revalidatePath("/sales");
   revalidatePath("/admin/corrections");
   return { ok: true };
 }

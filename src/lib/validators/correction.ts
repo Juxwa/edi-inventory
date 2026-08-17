@@ -104,6 +104,24 @@ export const stockEditSchema = z.object({
 });
 export type StockEditInput = z.infer<typeof stockEditSchema>;
 
+const optionalUuid = z.preprocess(
+  toOptionalText,
+  z.string().uuid({ message: "Invalid customer" }).nullable(),
+);
+
+export const saleEditSchema = z.object({
+  sale_id: requiredUuid,
+  or_no: optionalText,
+  csi_no: optionalText,
+  ci_no: optionalText,
+  sale_date: requiredDate,
+  customer_id: optionalUuid,
+  referred_by: optionalText,
+  is_paid: z.coerce.boolean().default(false),
+  reason: requiredReason,
+});
+export type SaleEditInput = z.infer<typeof saleEditSchema>;
+
 export const CORRECTION_ENTITIES = [
   "sale",
   "stock_intake",

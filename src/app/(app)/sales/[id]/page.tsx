@@ -9,6 +9,7 @@ import { PrintButton } from "@/components/print-button";
 import { VoidedBanner } from "@/components/admin/voided-banner";
 import { VoidDialog } from "@/components/admin/void-dialog";
 import { SerialCorrectDialog } from "@/components/admin/serial-correct-dialog";
+import { SaleEditDialog } from "@/components/admin/sale-edit-dialog";
 import { voidSale } from "@/app/(app)/admin/corrections/actions";
 import {
   Table,
@@ -54,6 +55,8 @@ const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
   senior_citizen: "Senior Citizen 20%",
   pwd: "PWD 20%",
 };
+
+type CustomerRow = { id: string; name: string; mobile_no: string | null };
 
 type LineRow = {
   id: string;
@@ -131,7 +134,11 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const [branchResult, customerResult, lineResult, voidedByResult] = await Promise.all([
     supabase.from("branches").select("id, name").eq("id", saleRow.branch_id).single(),
     saleRow.customer_id
-      ? supabase.from("customers").select("id, name").eq("id", saleRow.customer_id).single()
+      ? supabase
+          .from("customers")
+          .select("id, name, mobile_no")
+          .eq("id", saleRow.customer_id)
+          .single()
       : Promise.resolve({ data: null }),
     supabase
       .from("sale_line_items")
@@ -145,7 +152,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   ]);
 
   const branchName: string = (branchResult.data as { name: string } | null)?.name ?? "—";
-  const customer = customerResult.data as { id: string; name: string } | null;
+  const customer = customerResult.data as CustomerRow | null;
   const voidedByName = (voidedByResult.data as { name: string } | null)?.name ?? null;
 
   const lines: LineRow[] = (lineResult.data as LineRow[] | null) ?? [];
@@ -220,6 +227,18 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
           </p>
         </div>
         <span className="flex items-center gap-2 print:hidden">
+          {isAdmin && !isVoided ? (
+            <SaleEditDialog
+              saleId={saleRow.id}
+              currentOrNo={saleRow.or_no}
+              currentCsiNo={saleRow.csi_no}
+              currentCiNo={saleRow.ci_no}
+              currentSaleDate={saleRow.sale_date}
+              currentCustomer={customer}
+              currentReferredBy={saleRow.referred_by}
+              currentIsPaid={saleRow.is_paid}
+            />
+          ) : null}
           {isAdmin && !isVoided ? (
             <VoidDialog
               action={voidSale}
