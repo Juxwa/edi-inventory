@@ -163,8 +163,8 @@ export async function recordSale(
 
   const lines: PreparedLine[] = data.lines.map((line: SaleLineInput) => ({
     line_type: line.line_type,
-    stock_id: line.line_type === "stock" ? line.stock_id : null,
-    service_id: line.line_type === "service" ? line.service_id : null,
+    stock_id: line.line_type === "stock" ? (line.stock_id ?? null) : null,
+    service_id: line.line_type === "service" ? (line.service_id ?? null) : null,
     quantity: line.quantity,
     unit_price: line.unit_price,
     warranty_expiry: line.warranty_expiry ?? null,
