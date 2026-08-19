@@ -41,6 +41,7 @@ type SaleQueryRow = {
   customer_id: string | null;
   branch_id: string;
   discount: number | null;
+  vat_exempt: boolean | null;
   is_paid: boolean;
 };
 
@@ -100,7 +101,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
 
   let query = supabase
     .from("sales")
-    .select("id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, discount, is_paid", {
+    .select("id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, discount, vat_exempt, is_paid", {
       count: "exact",
     })
     .is("voided_at", null)
@@ -209,7 +210,11 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
 
   const sales: SalesRowData[] = rows.map((row: SaleQueryRow) => {
     const totals = lineTotalsBySaleId.get(row.id) ?? { gross: 0, lines: [] };
-    const net = Math.max(0, totals.gross - (row.discount ?? 0));
+    // VAT-exempt sales (SC/PWD): the stored discount applies to the
+    // VAT-removed base (gross / 1.12), so net payable must start there —
+    // otherwise the list overstates by exactly the exempted VAT.
+    const netBase = row.vat_exempt ? totals.gross / 1.12 : totals.gross;
+    const net = Math.max(0, netBase - (row.discount ?? 0));
     return {
       id: row.id,
       sale_date: row.sale_date,
