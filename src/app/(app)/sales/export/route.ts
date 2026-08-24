@@ -40,6 +40,7 @@ type LineRow = {
   serial_snapshot: string | null;
   after_sales_status: string | null;
   created_at: string;
+  is_freebie: boolean;
 };
 
 type ExportRow = {
@@ -149,7 +150,7 @@ export async function GET(request: Request): Promise<Response> {
       const { data: lineData } = await supabase
         .from("sale_line_items")
         .select(
-          "id, sale_id, line_type, product_id, service_id, quantity, unit_price, serial_snapshot, after_sales_status, created_at",
+          "id, sale_id, line_type, product_id, service_id, quantity, unit_price, serial_snapshot, after_sales_status, created_at, is_freebie",
         )
         .in("sale_id", idChunk)
         .order("sale_id")
@@ -243,6 +244,7 @@ export async function GET(request: Request): Promise<Response> {
         serial_snapshot: null,
         after_sales_status: null,
         created_at: "",
+        is_freebie: false,
       },
       isFirstLineOfSale: true,
     });
@@ -279,6 +281,10 @@ export async function GET(request: Request): Promise<Response> {
     {
       header: "Line total",
       value: (row) => (row.line.id === "" ? "" : row.line.quantity * row.line.unit_price),
+    },
+    {
+      header: "Freebie",
+      value: (row) => (row.line.id === "" ? "" : row.line.is_freebie ? "yes" : "no"),
     },
     {
       header: "Discount",

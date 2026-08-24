@@ -115,6 +115,10 @@ const saleLineSchema = z
     quantity: z.number().positive("Quantity must be greater than zero"),
     unit_price: z.number().min(0, "Price must be zero or greater"),
     warranty_expiry: z.string().nullable().optional(),
+    // Freebie lines (promo batteries, freebie accessories): stock still
+    // deducts normally, but unit_price is forced to 0 server-side
+    // regardless of what's submitted (see recordSale in actions.ts).
+    is_freebie: z.boolean().optional(),
   })
   .superRefine((line, ctx) => {
     if (line.line_type === "stock" && !line.stock_id) {

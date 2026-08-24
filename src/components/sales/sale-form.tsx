@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,6 +60,7 @@ type DraftLine = {
   max_quantity: number | null;
   quantity: string;
   unit_price: string;
+  is_freebie: boolean;
 };
 
 let nextLineKey = 0;
@@ -387,6 +389,7 @@ export function SaleForm({
           max_quantity: isSerialized ? 1 : stock.quantity,
           quantity: "1",
           unit_price: stock.srp !== null ? String(stock.srp) : "0",
+          is_freebie: false,
         },
       ];
     });
@@ -406,6 +409,7 @@ export function SaleForm({
           max_quantity: null,
           quantity: "1",
           unit_price: String(service.price),
+          is_freebie: false,
         },
       ];
     });
@@ -420,6 +424,21 @@ export function SaleForm({
     setLines((current: DraftLine[]) =>
       current.map((line: DraftLine) =>
         line.key === key ? { ...line, [field]: value } : line,
+      ),
+    );
+  }
+
+  // Checking "Freebie" zeroes + locks that line's price display — the RPC
+  // also forces unit_price = 0 server-side regardless of what's submitted
+  // (see recordSale in actions.ts), so this is UI convenience, not the
+  // trust boundary. Stock lines still run the full availability/decrement
+  // path; only the price is affected.
+  function handleToggleFreebie(key: string, checked: boolean) {
+    setLines((current: DraftLine[]) =>
+      current.map((line: DraftLine) =>
+        line.key === key
+          ? { ...line, is_freebie: checked, unit_price: checked ? "0" : line.unit_price }
+          : line,
       ),
     );
   }
@@ -486,6 +505,7 @@ export function SaleForm({
           service_id: line.line_type === "service" ? line.ref_id : null,
           quantity: Number.parseFloat(line.quantity) || 0,
           unit_price: Number.parseFloat(line.unit_price) || 0,
+          is_freebie: line.is_freebie,
         })),
       ),
     [lines],
@@ -621,13 +641,14 @@ export function SaleForm({
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead className="text-right">Unit price</TableHead>
                 <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-center">Freebie</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {lines.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
                     No lines yet. Add a product or service above.
                   </TableCell>
                 </TableRow>
@@ -642,6 +663,11 @@ export function SaleForm({
                         <span className="ml-2 text-xs text-muted-foreground">
                           {line.line_type === "stock" ? "Product" : "Service"}
                         </span>
+                        {line.is_freebie ? (
+                          <Badge variant="success" className="ml-2">
+                            FREE
+                          </Badge>
+                        ) : null}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {line.serial_number ?? "—"}
@@ -666,8 +692,14 @@ export function SaleForm({
                           min="0"
                           step="0.01"
                           value={line.unit_price}
-                          disabled={pending || linePricesLocked}
-                          title={linePricesLocked ? "SRP — locked" : undefined}
+                          disabled={pending || linePricesLocked || line.is_freebie}
+                          title={
+                            line.is_freebie
+                              ? "Freebie — price locked at 0"
+                              : linePricesLocked
+                                ? "SRP — locked"
+                                : undefined
+                          }
                           onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                             handleLineChange(line.key, "unit_price", event.target.value)
                           }
@@ -676,6 +708,18 @@ export function SaleForm({
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {formatCurrency(qty * price)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <input
+                          type="checkbox"
+                          disabled={pending}
+                          checked={line.is_freebie}
+                          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                            handleToggleFreebie(line.key, event.target.checked)
+                          }
+                          className="size-4 rounded border-input"
+                          aria-label={`Mark ${line.label} as freebie`}
+                        />
                       </TableCell>
                       <TableCell>
                         <Button

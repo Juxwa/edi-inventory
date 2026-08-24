@@ -159,6 +159,7 @@ export async function recordSale(
     quantity: number;
     unit_price: number;
     warranty_expiry: string | null;
+    is_freebie: boolean;
   };
 
   const lines: PreparedLine[] = data.lines.map((line: SaleLineInput) => ({
@@ -168,6 +169,7 @@ export async function recordSale(
     quantity: line.quantity,
     unit_price: line.unit_price,
     warranty_expiry: line.warranty_expiry ?? null,
+    is_freebie: line.is_freebie ?? false,
   }));
 
   // Line prices = SRP from the system. branch_rep cannot edit unit_price —
@@ -234,6 +236,15 @@ export async function recordSale(
         line.unit_price = priceByServiceId.get(line.service_id) ?? 0;
       }
     }
+  }
+
+  // Freebie lines are always priced at 0 — forced here regardless of role or
+  // whatever unit_price was submitted (mirrors the branch_rep SRP guard
+  // above: the client checkbox disables/zeroes the input, but that's UI
+  // only, so this is the real trust boundary). The RPC also forces this
+  // independently as defense in depth.
+  for (const line of lines) {
+    if (line.is_freebie) line.unit_price = 0;
   }
 
   const grossTotal = lines.reduce(

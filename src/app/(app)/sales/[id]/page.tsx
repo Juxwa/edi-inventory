@@ -70,6 +70,7 @@ type LineRow = {
   warranty_expiry: string | null;
   after_sales_status: AfterSalesStatus | null;
   returned_quantity: number | null;
+  is_freebie: boolean;
 };
 
 function formatCurrency(value: number): string {
@@ -143,7 +144,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
     supabase
       .from("sale_line_items")
       .select(
-        "id, line_type, stock_id, product_id, service_id, quantity, unit_price, serial_snapshot, warranty_expiry, after_sales_status, returned_quantity",
+        "id, line_type, stock_id, product_id, service_id, quantity, unit_price, serial_snapshot, warranty_expiry, after_sales_status, returned_quantity, is_freebie",
       )
       .eq("sale_id", saleRow.id),
     saleRow.voided_by
@@ -371,6 +372,11 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
                           <span className="ml-2 text-xs text-muted-foreground">
                             {line.line_type === "stock" ? "Product" : "Service"}
                           </span>
+                          {line.is_freebie ? (
+                            <Badge variant="success" className="ml-2">
+                              FREE
+                            </Badge>
+                          ) : null}
                         </TableCell>
                         <TableCell className="text-muted-foreground">
                           <div className="flex items-center gap-1">
