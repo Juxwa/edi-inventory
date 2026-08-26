@@ -41,7 +41,20 @@ export async function importCustomers(file: string) {
     const r = mapCustomer(row, i + 2, branches);
     'record' in r ? records.push(r.record) : exceptions.push(r.exception);
   });
-  await batchUpsert(client, 'customers', records);
+
+  // legacy_ids already merged away by merge-duplicate-customers.ts — importing
+  // them again would resurrect deleted duplicates
+  const merged = new Set(
+    ((await fetchAll(client, 'customer_merge_log', 'merged_legacy_id')) as
+      { merged_legacy_id: string | null }[])
+      .map(r => r.merged_legacy_id)
+      .filter((id): id is string => !!id));
+  const active = records.filter(r =>
+    !merged.has((r as { legacy_id?: string | null }).legacy_id ?? ''));
+  const skipped = records.length - active.length;
+
+  await batchUpsert(client, 'customers', active);
   writeExceptions('customers', exceptions);
-  console.log(`customers: imported ${records.length}/${rows.length}`);
+  console.log(`customers: imported ${active.length}/${rows.length}` +
+    (skipped ? ` (skipped ${skipped} previously merged)` : ''));
 }

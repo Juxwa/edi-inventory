@@ -50,6 +50,11 @@ const NAV: NavSection[] = [
         label: "Manage Suppliers",
         roles: ["admin"],
       },
+      {
+        href: "/pricing",
+        label: "Service pricing",
+        roles: ["admin", "branch_rep", "technical"],
+      },
     ],
   },
   {

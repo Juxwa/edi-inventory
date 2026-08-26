@@ -1,4 +1,6 @@
-// Merge duplicate customer rows that share an exact (normalized) name.
+// Merge duplicate customer rows that share a normalized name (case-,
+// whitespace-, and corporate-suffix-insensitive: "X Company", "X Company Inc"
+// and "X Company Inc." group together).
 // Scope: groups with >= MIN_GROUP rows — at that size the name is an
 // institution or doctor, not two people who happen to share a name.
 //
@@ -7,18 +9,40 @@
 // contact fields from the duplicates, log everything to customer_merge_log,
 // then delete the duplicates. Every merge is reversible from the log.
 //
-// NOTE: merged rows lose their legacy_id — re-running the Bubble customer
-// import would resurrect them. Don't re-run scripts/import/customers.ts
-// after merging without checking customer_merge_log first.
+// NOTE: scripts/import/customers.ts skips legacy_ids found in
+// customer_merge_log, so re-running the Bubble import no longer resurrects
+// merged rows (it did before 2026-08-24 — that is how the 2026-08-06 re-import
+// undid the 2026-08-04 merge batch).
 import { serviceClient, fetchAll } from '../import/lib';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
 const MIN_GROUP = 10;
+// DRY_RUN=1 npx tsx ... — list what would merge, change nothing
+const DRY_RUN = process.env.DRY_RUN === '1';
 // placeholder "names" that aren't a single real entity — never merge these
 const SKIP_NAMES = new Set(['cash', 'walk-in', 'walk in', 'n/a', 'na', 'none', 'test']);
 
 const norm = (s: string | null | undefined) =>
   (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+// corporate suffix tokens stripped (repeatedly) from the end of a name for
+// grouping, so punctuation/suffix variants of one institution merge together
+const SUFFIXES = new Set(['inc', 'incorporated', 'corp', 'corporation', 'ltd', 'llc']);
+const stripSuffixes = (k: string): string => {
+  const words = k.split(' ').map(w => w.replace(/[.,]+$/, ''));
+  while (words.length > 1 && SUFFIXES.has(words[words.length - 1])) words.pop();
+  return words.join(' ');
+};
+
+// confirmed same-entity names that don't normalize to their group's key
+const ALIASES = new Map<string, string>([
+  ['autocust:jeismic medical', 'jeismic medical company'],
+]);
+
+const groupKey = (name: string | null | undefined): string => {
+  const k = stripSuffixes(norm(name));
+  return ALIASES.get(k) ?? k;
+};
 
 type Customer = {
   id: string; legacy_id: string | null; name: string; mobile_no: string | null;
@@ -51,13 +75,22 @@ async function main() {
 
   const byName = new Map<string, Customer[]>();
   for (const c of customers) {
-    const k = norm(c.name);
+    const k = groupKey(c.name);
     if (!k || SKIP_NAMES.has(k)) continue;
     (byName.get(k) ?? byName.set(k, []).get(k)!).push(c);
   }
   const groups = [...byName.values()].filter(g => g.length >= MIN_GROUP);
   console.log(`batch ${batch}: ${groups.length} groups, ` +
     `${groups.reduce((a, g) => a + g.length - 1, 0)} rows to merge`);
+
+  if (DRY_RUN) {
+    for (const g of groups) {
+      const names = [...new Set(g.map(c => c.name))];
+      console.log(`  [dry-run] ${g.length} rows: ${names.join(' | ')}`);
+    }
+    console.log('dry run — nothing changed');
+    return;
+  }
 
   const report: string[] = ['kept_id,name,merged_count,sales_repointed,visits_repointed,repairs_repointed'];
   let totalMerged = 0, totalSales = 0, totalVisits = 0, totalRepairs = 0;
