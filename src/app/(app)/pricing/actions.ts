@@ -6,12 +6,51 @@ import { getProfile } from "@/lib/supabase/profile";
 import {
   setServicePriceSchema,
   clearServicePriceSchema,
+  createServiceSchema,
 } from "@/lib/validators/pricing";
 
 export type PricingActionState = {
   ok: boolean;
   error?: string;
 };
+
+// Creates a new service (admin only — branch roles manage prices, not the
+// service catalog). Called through useActionState from AddServiceDialog.
+// RLS also restricts services writes to admin (cat_admin_write, 0006), so
+// this check is convenience/UX on top of the DB-level rule.
+export async function createService(
+  _prevState: PricingActionState,
+  formData: FormData,
+): Promise<PricingActionState> {
+  const parsed = createServiceSchema.safeParse({
+    name: formData.get("name"),
+    description: formData.get("description") ?? undefined,
+  });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+  }
+
+  const profile = await getProfile();
+  if (!profile || profile.role !== "admin") {
+    return { ok: false, error: "Only admins can add services." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("services").insert({
+    name: parsed.data.name,
+    description: parsed.data.description,
+  });
+
+  if (error) {
+    if (error.code === "23505") {
+      return { ok: false, error: "A service with that name already exists." };
+    }
+    return { ok: false, error: "Could not add service." };
+  }
+
+  revalidatePath("/pricing");
+  return { ok: true };
+}
 
 const PRICING_ROLES = ["admin", "branch_rep", "technical"];
 

@@ -5,6 +5,7 @@ import {
   ServicePricingTable,
   type ServicePricingRow,
 } from "@/components/pricing/service-pricing-table";
+import { AddServiceDialog } from "@/components/pricing/add-service-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -67,11 +68,14 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-lg font-semibold">Service pricing</h1>
-        <p className="text-sm text-muted-foreground">
-          Prices set here prefill service lines on sales at your branch.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold">Service pricing</h1>
+          <p className="text-sm text-muted-foreground">
+            Prices set here prefill service lines on sales at your branch.
+          </p>
+        </div>
+        {isAdmin ? <AddServiceDialog /> : null}
       </div>
 
       {isAdmin && branches.length > 0 ? (

@@ -15,3 +15,21 @@ export const clearServicePriceSchema = z.object({
   branch_id: z.string().uuid("Invalid branch"),
 });
 export type ClearServicePriceInput = z.infer<typeof clearServicePriceSchema>;
+
+// Admin-only "Add service" dialog on the pricing page. Name is unique in the
+// services table — the action maps the unique-violation error to a friendly
+// message rather than pre-checking.
+export const createServiceSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Service name is required")
+    .max(200, "Service name is too long"),
+  description: z
+    .string()
+    .trim()
+    .max(1000, "Description is too long")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
+});
+export type CreateServiceInput = z.infer<typeof createServiceSchema>;
