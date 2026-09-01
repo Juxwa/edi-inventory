@@ -442,22 +442,22 @@ export const GUIDES: Guide[] = [
       {
         heading: "Corrections log",
         body: [
-          “Admin → Corrections log records every void, reversal, and serial correction made anywhere in the app, each with the reason given and a before/after snapshot of the record.”,
-          “Filter by entity (sale, stock intake, stock, transfer, repair, earmold, serial) and date range. Click Details on a row to see the full before/after data.”,
+          "Admin → Corrections log records every void, reversal, and serial correction made anywhere in the app, each with the reason given and a before/after snapshot of the record.",
+          "Filter by entity (sale, stock intake, stock, transfer, repair, earmold, serial) and date range. Click Details on a row to see the full before/after data.",
         ],
         tips: [
-          “Use this log to answer “who changed this and why” — it’s the audit trail for every correction, not just a list of current values.”,
+          "Use this log to answer 'who changed this and why' — it's the audit trail for every correction, not just a list of current values.",
         ],
       },
       {
         heading: "Activity log",
         body: [
-          “Admin → Activity log is a low-level database audit trail showing every INSERT, UPDATE, and DELETE across all tables — stock, sales, transfers, repairs, customers, pricing, users, and more.”,
-          “Filter by table, operation type, row ID, or date range. Results are paged (50 per page) and show the exact timestamp, the row that changed, and who made the change.”,
+          "Admin → Activity log is a low-level database audit trail showing every INSERT, UPDATE, and DELETE across all tables — stock, sales, transfers, repairs, customers, pricing, users, and more.",
+          "Filter by table, operation type, row ID, or date range. Results are paged (50 per page) and show the exact timestamp, the row that changed, and who made the change.",
         ],
         tips: [
-          “Use this when the Corrections log doesn’t have enough detail — for example, to trace exactly when a stock record was created or a pricing row was last touched.”,
-          “This page is admin-only and not linked from the sidebar by default — access it directly via Admin → Activity.”,
+          "Use this when the Corrections log doesn't have enough detail — for example, to trace exactly when a stock record was created or a pricing row was last touched.",
+          "This page is admin-only and not linked from the sidebar by default — access it directly via Admin → Activity.",
         ],
       },
       {
