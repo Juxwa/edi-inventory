@@ -345,7 +345,7 @@ export const GUIDES: Guide[] = [
         heading: "Setting or updating a price",
         steps: [
           "Go to Pricing in the sidebar.",
-          "Your branch's service list loads automatically. The Current price column shows what is saved; "Not set" means no price is on file.",
+          "Your branch's service list loads automatically. The Current price column shows what is saved; 'Not set' means no price is on file.",
           "Type the new price (in PHP, decimals allowed) in the New price field on the row you want to change.",
           "Click Save. The row updates immediately and a confirmation appears.",
         ],
@@ -358,7 +358,7 @@ export const GUIDES: Guide[] = [
         heading: "Clearing a price",
         steps: [
           "Find the service row with a saved price.",
-          "Click Clear. The price is removed and the row shows "Not set".",
+          "Click Clear. The price is removed and the row shows 'Not set'.",
         ],
         body: [
           "Clearing a price means the service line on new sales will not prefill a value — staff will need to enter the price manually at point of sale.",
