@@ -21,6 +21,7 @@ type SaleQueryRow = {
   customer_id: string | null;
   branch_id: string;
   sold_by: string | null;
+  referred_by: string | null;
   discount: number | null;
   discount_type: string | null;
   discount_id_no: string | null;
@@ -112,7 +113,7 @@ export async function GET(request: Request): Promise<Response> {
     let salesQuery = supabase
       .from("sales")
       .select(
-        "id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, sold_by, discount, discount_type, discount_id_no, vat_exempt, is_paid, voided_at",
+        "id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, sold_by, referred_by, discount, discount_type, discount_id_no, vat_exempt, is_paid, voided_at",
       )
       .order("sale_date", { ascending: false })
       .order("id", { ascending: false })
@@ -250,6 +251,24 @@ export async function GET(request: Request): Promise<Response> {
     });
   }
 
+  // Per-sale net sales = sum of that sale's line totals minus the
+  // header-level discount, matching the sales_totals view
+  // (0014_vat.sql: sum(unit_price * quantity) - discount). Printed on the
+  // sale's first line only, like Discount, so summing the column doesn't
+  // double-count.
+  const grossBySaleId = new Map<string, number>();
+  for (const line of lines) {
+    grossBySaleId.set(
+      line.sale_id,
+      (grossBySaleId.get(line.sale_id) ?? 0) + line.quantity * line.unit_price,
+    );
+  }
+  const netSalesBySaleId = new Map<string, number>();
+  for (const sale of sales) {
+    const gross = grossBySaleId.get(sale.id) ?? 0;
+    netSalesBySaleId.set(sale.id, gross - (sale.discount ?? 0));
+  }
+
   function lineName(line: LineRow): string {
     if (line.id === "") return "(no lines)";
     if (line.line_type === "service") {
@@ -273,6 +292,7 @@ export async function GET(request: Request): Promise<Response> {
       header: "Sold by",
       value: (row) => (row.sale.sold_by ? (profileNameById.get(row.sale.sold_by) ?? "—") : ""),
     },
+    { header: "Referred by", value: (row) => row.sale.referred_by },
     { header: "Line type", value: (row) => (row.line.id === "" ? "" : row.line.line_type) },
     { header: "Product/service", value: (row) => lineName(row.line) },
     { header: "Serial", value: (row) => row.line.serial_snapshot },
@@ -301,6 +321,10 @@ export async function GET(request: Request): Promise<Response> {
     {
       header: "VAT-exempt",
       value: (row) => (row.isFirstLineOfSale ? (row.sale.vat_exempt ? "yes" : "no") : ""),
+    },
+    {
+      header: "Net sales",
+      value: (row) => (row.isFirstLineOfSale ? (netSalesBySaleId.get(row.sale.id) ?? 0) : ""),
     },
     { header: "Paid", value: (row) => (row.sale.is_paid ? "yes" : "no") },
     {

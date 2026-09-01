@@ -23,7 +23,12 @@ export async function GET(request: Request): Promise<Response> {
       : undefined,
   });
 
-  type SaleMeta = { id: string; or_no: string | null; customer_id: string | null };
+  type SaleMeta = {
+    id: string;
+    or_no: string | null;
+    customer_id: string | null;
+    referred_by: string | null;
+  };
 
   const supabase = await createClient();
   // salesMeta is a raw `sales` read over the same date range as fetchPerSale
@@ -35,7 +40,7 @@ export async function GET(request: Request): Promise<Response> {
     fetchAllPages<SaleMeta>((from: number, to: number) =>
       supabase
         .from("sales")
-        .select("id, or_no, customer_id")
+        .select("id, or_no, customer_id, referred_by")
         .gte("sale_date", filters.from)
         .lte("sale_date", filters.to)
         .order("id", { ascending: true })
@@ -57,6 +62,10 @@ export async function GET(request: Request): Promise<Response> {
     { header: "Sale date", value: (row) => row.sale_date },
     { header: "Branch", value: (row) => branchNameById.get(row.branch_id) ?? "" },
     { header: "OR no.", value: (row) => metaById.get(row.sale_id)?.or_no ?? "" },
+    {
+      header: "Referred by",
+      value: (row) => metaById.get(row.sale_id)?.referred_by ?? "",
+    },
     { header: "Gross", value: (row) => row.gross },
     { header: "Discount", value: (row) => row.discount },
     { header: "Net sales", value: (row) => row.net_sales },
