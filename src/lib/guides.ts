@@ -440,7 +440,7 @@ export const GUIDES: Guide[] = [
         ],
       },
       {
-        heading: “Corrections log”,
+        heading: "Corrections log",
         body: [
           “Admin → Corrections log records every void, reversal, and serial correction made anywhere in the app, each with the reason given and a before/after snapshot of the record.”,
           “Filter by entity (sale, stock intake, stock, transfer, repair, earmold, serial) and date range. Click Details on a row to see the full before/after data.”,
@@ -450,7 +450,7 @@ export const GUIDES: Guide[] = [
         ],
       },
       {
-        heading: “Activity log”,
+        heading: "Activity log",
         body: [
           “Admin → Activity log is a low-level database audit trail showing every INSERT, UPDATE, and DELETE across all tables — stock, sales, transfers, repairs, customers, pricing, users, and more.”,
           “Filter by table, operation type, row ID, or date range. Results are paged (50 per page) and show the exact timestamp, the row that changed, and who made the change.”,
