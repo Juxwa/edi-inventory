@@ -329,6 +329,51 @@ export const GUIDES: Guide[] = [
     ],
   },
   {
+    slug: "service-pricing",
+    title: "Service pricing",
+    summary:
+      "Set and update your branch's prices for services so they prefill correctly on sales.",
+    roles: ["admin", "branch_rep", "technical"],
+    sections: [
+      {
+        heading: "What service pricing does",
+        body: [
+          "Service prices are per-branch — each branch sets its own rate for each service. When you add a service line to a sale, the saved price prefills automatically so your team doesn't have to type it every time.",
+        ],
+      },
+      {
+        heading: "Setting or updating a price",
+        steps: [
+          "Go to Pricing in the sidebar.",
+          "Your branch's service list loads automatically. The Current price column shows what is saved; "Not set" means no price is on file.",
+          "Type the new price (in PHP, decimals allowed) in the New price field on the row you want to change.",
+          "Click Save. The row updates immediately and a confirmation appears.",
+        ],
+        tips: [
+          "You can only update prices for your own branch. The page always shows your branch — you cannot switch to another.",
+          "Admins see a Branch selector at the top. Pick a branch and click Load to manage that branch's prices.",
+        ],
+      },
+      {
+        heading: "Clearing a price",
+        steps: [
+          "Find the service row with a saved price.",
+          "Click Clear. The price is removed and the row shows "Not set".",
+        ],
+        body: [
+          "Clearing a price means the service line on new sales will not prefill a value — staff will need to enter the price manually at point of sale.",
+        ],
+      },
+      {
+        heading: "Who can do this",
+        body: [
+          "Branch Representatives, Technical staff, and Admins can set and clear prices. Admins can manage any branch's prices; all other roles are limited to their own branch only.",
+          "Top Management cannot edit prices — the page is not in their sidebar.",
+        ],
+      },
+    ],
+  },
+  {
     slug: "chat",
     title: "Chat and messages",
     summary:
@@ -395,13 +440,24 @@ export const GUIDES: Guide[] = [
         ],
       },
       {
-        heading: "Corrections log",
+        heading: “Corrections log”,
         body: [
-          "Admin → Corrections log records every void, reversal, and serial correction made anywhere in the app, each with the reason given and a before/after snapshot of the record.",
-          "Filter by entity (sale, stock intake, stock, transfer, repair, earmold, serial) and date range. Click Details on a row to see the full before/after data.",
+          “Admin → Corrections log records every void, reversal, and serial correction made anywhere in the app, each with the reason given and a before/after snapshot of the record.”,
+          “Filter by entity (sale, stock intake, stock, transfer, repair, earmold, serial) and date range. Click Details on a row to see the full before/after data.”,
         ],
         tips: [
-          "Use this log to answer “who changed this and why” — it’s the audit trail for every correction, not just a list of current values.",
+          “Use this log to answer “who changed this and why” — it’s the audit trail for every correction, not just a list of current values.”,
+        ],
+      },
+      {
+        heading: “Activity log”,
+        body: [
+          “Admin → Activity log is a low-level database audit trail showing every INSERT, UPDATE, and DELETE across all tables — stock, sales, transfers, repairs, customers, pricing, users, and more.”,
+          “Filter by table, operation type, row ID, or date range. Results are paged (50 per page) and show the exact timestamp, the row that changed, and who made the change.”,
+        ],
+        tips: [
+          “Use this when the Corrections log doesn’t have enough detail — for example, to trace exactly when a stock record was created or a pricing row was last touched.”,
+          “This page is admin-only and not linked from the sidebar by default — access it directly via Admin → Activity.”,
         ],
       },
       {
@@ -497,6 +553,7 @@ const PATH_GUIDES: [prefix: string, slug: string][] = [
   ["/requests", "stock-requests"],
   ["/repairs", "repairs"],
   ["/earmolds", "earmolds"],
+  ["/pricing", "service-pricing"],
   ["/reports", "reports"],
   ["/analytics", "analytics"],
   ["/admin", "admin-users"],
