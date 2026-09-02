@@ -29,6 +29,7 @@ type SalesPageProps = {
     branch?: string;
     q?: string;
     page?: string;
+    balance?: string;
   }>;
 };
 
@@ -55,6 +56,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
   const fromDate = params.from?.trim() ?? "";
   const toDate = params.to?.trim() ?? "";
   const q = params.q?.trim() ?? "";
+  const balanceOnly = params.balance === "1";
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -65,10 +67,16 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
   const branchParam = canFilterBranch ? (params.branch?.trim() ?? "") : "";
   const lockedBranchId = !canFilterBranch ? profile.branch_id : null;
 
-  const branchesResult = await supabase.from("branches").select("id, name").order("name");
-  const branches: { id: string; name: string }[] = branchesResult.data ?? [];
+  const branchesResult = await supabase
+    .from("branches")
+    .select("id, name, is_active")
+    .order("name");
+  const branches: { id: string; name: string; is_active: boolean }[] = branchesResult.data ?? [];
   const branchNameById = new Map<string, string>(
-    branches.map((branch: { id: string; name: string }) => [branch.id, branch.name]),
+    branches.map((branch: { id: string; name: string; is_active: boolean }) => [
+      branch.id,
+      branch.name,
+    ]),
   );
 
   let matchingSaleIds: string[] | null = null;
@@ -99,6 +107,25 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
     matchingSaleIds = Array.from(new Set([...saleIdsFromCustomers, ...saleIdsFromLines]));
   }
 
+  // "With balance" (receivables) filter: the balance is computed in the
+  // sales_balances view (0053) — collect matching sale ids first, then
+  // restrict the main query to them so count/pagination stay correct.
+  let balanceSaleIds: string[] | null = null;
+  if (balanceOnly) {
+    let balanceQuery = supabase
+      .from("sales_balances")
+      .select("sale_id")
+      .gt("balance", 0.009);
+    if (fromDate) balanceQuery = balanceQuery.gte("sale_date", fromDate);
+    if (toDate) balanceQuery = balanceQuery.lte("sale_date", toDate);
+    if (lockedBranchId) balanceQuery = balanceQuery.eq("branch_id", lockedBranchId);
+    else if (branchParam) balanceQuery = balanceQuery.eq("branch_id", branchParam);
+    const { data: balanceRows } = await balanceQuery;
+    balanceSaleIds = ((balanceRows as { sale_id: string }[] | null) ?? []).map(
+      (row: { sale_id: string }) => row.sale_id,
+    );
+  }
+
   let query = supabase
     .from("sales")
     .select("id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, discount, vat_exempt, is_paid", {
@@ -107,6 +134,10 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
     .is("voided_at", null)
     .order("sale_date", { ascending: false })
     .range(from, to);
+
+  if (balanceSaleIds !== null) {
+    query = query.in("id", balanceSaleIds.length > 0 ? balanceSaleIds : ["00000000-0000-0000-0000-000000000000"]);
+  }
 
   if (fromDate) query = query.gte("sale_date", fromDate);
   if (toDate) query = query.lte("sale_date", toDate);
@@ -144,6 +175,23 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
   }
 
   const saleIds = rows.map((row: SaleQueryRow) => row.id);
+
+  // Paid totals per sale on this page, for the Balance column.
+  type BalanceRow = { sale_id: string; paid: number; balance: number };
+  let balanceBySaleId = new Map<string, BalanceRow>();
+  if (saleIds.length > 0) {
+    const { data: balanceData } = await supabase
+      .from("sales_balances")
+      .select("sale_id, paid, balance")
+      .in("sale_id", saleIds);
+    balanceBySaleId = new Map(
+      ((balanceData as BalanceRow[] | null) ?? []).map((row: BalanceRow) => [
+        row.sale_id,
+        row,
+      ]),
+    );
+  }
+
   type LineRow = {
     sale_id: string;
     line_type: "stock" | "service";
@@ -228,6 +276,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
       lines: totals.lines,
       net,
       is_paid: row.is_paid,
+      balance: balanceBySaleId.get(row.id)?.balance ?? 0,
     };
   });
 
@@ -240,12 +289,13 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
     if (toDate) next.set("to", toDate);
     if (branchParam) next.set("branch", branchParam);
     if (q) next.set("q", q);
+    if (balanceOnly) next.set("balance", "1");
     next.set("page", String(targetPage));
     return `/sales?${next.toString()}`;
   }
 
   const canRecord = profile.role === "admin" || profile.role === "branch_rep";
-  const hasFilters = fromDate || toDate || branchParam || q;
+  const hasFilters = fromDate || toDate || branchParam || q || balanceOnly;
 
   const exportParams = new URLSearchParams();
   if (fromDate) exportParams.set("from", fromDate);
@@ -301,9 +351,10 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
                 <SelectValue placeholder="All branches" />
               </SelectTrigger>
               <SelectContent>
-                {branches.map((branch: { id: string; name: string }) => (
+                {branches.map((branch: { id: string; name: string; is_active: boolean }) => (
                   <SelectItem key={branch.id} value={branch.id}>
                     {branch.name}
+                    {branch.is_active ? "" : " (closed)"}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -322,6 +373,16 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
             className="w-56"
           />
         </div>
+        <label className="flex h-9 items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            name="balance"
+            value="1"
+            defaultChecked={balanceOnly}
+            className="size-4 rounded border-input"
+          />
+          With balance only
+        </label>
         <Button type="submit" variant="secondary">
           Apply
         </Button>

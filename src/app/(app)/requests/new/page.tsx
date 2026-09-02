@@ -28,7 +28,7 @@ export default async function NewRequestPage() {
       .select("id, name, code")
       .eq("archived", false)
       .order("name"),
-    supabase.from("branches").select("id, name").order("name"),
+    supabase.from("branches").select("id, name").eq("is_active", true).order("name"),
   ]);
 
   const products: RequestProductOption[] = productsResult.data ?? [];

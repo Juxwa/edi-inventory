@@ -57,11 +57,11 @@ export default async function SalesReportPage({
 
   const [branchesResult, monthlyRows] = await Promise.all([
     canFilterBranch
-      ? supabase.from("branches").select("id, name").order("name")
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      ? supabase.from("branches").select("id, name, is_active").order("name")
+      : Promise.resolve({ data: [] as { id: string; name: string; is_active: boolean }[] }),
     fetchMonthly(supabase, filters),
   ]);
-  const branches: { id: string; name: string }[] = branchesResult.data ?? [];
+  const branches: { id: string; name: string; is_active: boolean }[] = branchesResult.data ?? [];
 
   const months = rollUpByMonth(monthlyRows);
   const chartData: SalesChartPoint[] = months.map((row) => ({
@@ -135,9 +135,10 @@ export default async function SalesReportPage({
                 <SelectValue placeholder="All branches" />
               </SelectTrigger>
               <SelectContent>
-                {branches.map((branch: { id: string; name: string }) => (
+                {branches.map((branch: { id: string; name: string; is_active: boolean }) => (
                   <SelectItem key={branch.id} value={branch.id}>
                     {branch.name}
+                    {branch.is_active ? "" : " (closed)"}
                   </SelectItem>
                 ))}
               </SelectContent>

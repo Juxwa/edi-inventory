@@ -96,7 +96,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     customerRowsAllTime,
     repairRows,
   ] = await Promise.all([
-    supabase.from("branches").select("id, name").order("name"),
+    supabase.from("branches").select("id, name, is_active").order("name"),
     supabase.from("product_categories").select("id, name").order("name"),
     fetchProductSales(supabase, filters),
     fetchServiceSales(supabase, filters),
@@ -109,7 +109,7 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     fetchRepairsByProduct(supabase, filters),
   ]);
 
-  const branches: { id: string; name: string }[] = branchesResult.data ?? [];
+  const branches: { id: string; name: string; is_active: boolean }[] = branchesResult.data ?? [];
   const categories: { id: number; name: string }[] = categoriesResult.data ?? [];
 
   const totals = computeTotals(productRows, serviceRows);
@@ -213,9 +213,10 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
               <SelectValue placeholder="All branches" />
             </SelectTrigger>
             <SelectContent>
-              {branches.map((branch: { id: string; name: string }) => (
+              {branches.map((branch: { id: string; name: string; is_active: boolean }) => (
                 <SelectItem key={branch.id} value={branch.id}>
                   {branch.name}
+                  {branch.is_active ? "" : " (closed)"}
                 </SelectItem>
               ))}
             </SelectContent>

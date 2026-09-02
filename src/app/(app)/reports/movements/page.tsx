@@ -76,12 +76,15 @@ export default async function MovementsReportPage({
   const supabase = await createClient();
 
   const [branchesResult, { rows, count }] = await Promise.all([
-    supabase.from("branches").select("id, name").order("name"),
+    supabase.from("branches").select("id, name, is_active").order("name"),
     fetchMovements(supabase, filters, { from, to }),
   ]);
-  const branches: { id: string; name: string }[] = branchesResult.data ?? [];
+  const branches: { id: string; name: string; is_active: boolean }[] = branchesResult.data ?? [];
   const branchNameById = new Map<string, string>(
-    branches.map((branch: { id: string; name: string }) => [branch.id, branch.name]),
+    branches.map((branch: { id: string; name: string; is_active: boolean }) => [
+      branch.id,
+      branch.name,
+    ]),
   );
 
   const productIds = Array.from(
@@ -183,9 +186,10 @@ export default async function MovementsReportPage({
                 <SelectValue placeholder="All branches" />
               </SelectTrigger>
               <SelectContent>
-                {branches.map((branch: { id: string; name: string }) => (
+                {branches.map((branch: { id: string; name: string; is_active: boolean }) => (
                   <SelectItem key={branch.id} value={branch.id}>
                     {branch.name}
+                    {branch.is_active ? "" : " (closed)"}
                   </SelectItem>
                 ))}
               </SelectContent>

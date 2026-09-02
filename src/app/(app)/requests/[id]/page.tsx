@@ -161,19 +161,25 @@ export default async function RequestDetailPage({
         </CardContent>
       </Card>
 
-      {isAdmin ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Admin notes</CardTitle>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle>Admin notes</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isAdmin ? (
             <AdminNotesEditor
               requestId={requestRow.id}
               initialNotes={requestRow.admin_notes}
             />
-          </CardContent>
-        </Card>
-      ) : null}
+          ) : (
+            // Read-only for branch reps/technical: admins reply to requests
+            // here, so hiding it made those replies invisible to the requester.
+            <p className="text-sm font-medium whitespace-pre-wrap">
+              {requestRow.admin_notes?.trim() ? requestRow.admin_notes : "—"}
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

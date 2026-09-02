@@ -17,6 +17,7 @@ export default async function NewEarmoldPage() {
   const branchesResult = await supabase
     .from("branches")
     .select("id, name")
+    .eq("is_active", true)
     .order("name");
   const branches: { id: string; name: string }[] = branchesResult.data ?? [];
 

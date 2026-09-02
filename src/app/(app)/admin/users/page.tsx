@@ -33,17 +33,30 @@ export default async function AdminUsersPage() {
       .from("profiles")
       .select("id, name, role, branch_id, is_active")
       .order("name"),
-    supabase.from("branches").select("id, name").order("name"),
+    supabase.from("branches").select("id, name, is_active").order("name"),
     // Auth emails + last sign-in live in auth.users, only reachable via the
     // admin API. ponytail: single page of 1000 covers this team's size.
     admin.auth.admin.listUsers({ page: 1, perPage: 1000 }),
   ]);
 
   const profiles: ProfileRow[] = (profilesResult.data as ProfileRow[] | null) ?? [];
-  const branches: { id: string; name: string }[] = branchesResult.data ?? [];
+  // All branches (including closed ones) feed the name lookup below, so a
+  // user already assigned to a closed branch still shows its name. Only
+  // active branches are offered in the assignment dropdown further down.
+  const allBranches: { id: string; name: string; is_active: boolean }[] =
+    branchesResult.data ?? [];
   const branchNameById = new Map<string, string>(
-    branches.map((branch: { id: string; name: string }) => [branch.id, branch.name]),
+    allBranches.map((branch: { id: string; name: string; is_active: boolean }) => [
+      branch.id,
+      branch.name,
+    ]),
   );
+  const branches: { id: string; name: string }[] = allBranches
+    .filter((branch: { id: string; name: string; is_active: boolean }) => branch.is_active)
+    .map((branch: { id: string; name: string; is_active: boolean }) => ({
+      id: branch.id,
+      name: branch.name,
+    }));
 
   type AuthUser = { id: string; email?: string; last_sign_in_at?: string };
   const authById = new Map<string, AuthUser>(

@@ -12,6 +12,10 @@ import {
   type SaleLineInput,
   type RecordSaleInput,
 } from "@/lib/validators/sale";
+import {
+  addSalePaymentSchema,
+  deleteSalePaymentSchema,
+} from "@/lib/validators/payment";
 
 function firstIssueMessage(issues: { message: string }[]): string {
   return issues[0]?.message ?? "Invalid input.";
@@ -321,6 +325,87 @@ export async function returnSaleLine(
 
   if (error) {
     return { ok: false, error: rpcErrorMessage(error, "Could not return line.") };
+  }
+
+  revalidatePath(`/sales/${parsed.data.sale_id}`);
+  revalidatePath("/sales");
+  return { ok: true };
+}
+
+export type PaymentActionState = {
+  ok: boolean;
+  error?: string;
+};
+
+// Records a partial payment (downpayment, installment, final payment)
+// against an existing sale. The sale_add_payment RPC re-validates amount
+// against the remaining balance and flips sales.is_paid when settled.
+export async function addSalePayment(
+  _prevState: PaymentActionState,
+  formData: FormData,
+): Promise<PaymentActionState> {
+  const parsed = addSalePaymentSchema.safeParse({
+    sale_id: formData.get("sale_id"),
+    amount: formData.get("amount"),
+    payment_date: formData.get("payment_date") ?? undefined,
+    or_no: formData.get("or_no") ?? undefined,
+    method: formData.get("method") ?? undefined,
+    note: formData.get("note") ?? undefined,
+  });
+  if (!parsed.success) {
+    return { ok: false, error: firstIssueMessage(parsed.error.issues) };
+  }
+
+  const profile = await getProfile();
+  if (!profile || !["admin", "branch_rep"].includes(profile.role)) {
+    return { ok: false, error: "Not authorized." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("sale_add_payment", {
+    p_sale_id: parsed.data.sale_id,
+    p_amount: parsed.data.amount,
+    p_payment_date: parsed.data.payment_date ?? null,
+    p_or_no: parsed.data.or_no ?? null,
+    p_method: parsed.data.method ?? null,
+    p_note: parsed.data.note ?? null,
+  });
+
+  if (error) {
+    return { ok: false, error: rpcErrorMessage(error, "Could not record payment.") };
+  }
+
+  revalidatePath(`/sales/${parsed.data.sale_id}`);
+  revalidatePath("/sales");
+  return { ok: true };
+}
+
+// Admin-only mistake correction; the RPC enforces the role at the DB level
+// too and recomputes is_paid from the remaining payments.
+export async function deleteSalePayment(
+  _prevState: PaymentActionState,
+  formData: FormData,
+): Promise<PaymentActionState> {
+  const parsed = deleteSalePaymentSchema.safeParse({
+    payment_id: formData.get("payment_id"),
+    sale_id: formData.get("sale_id"),
+  });
+  if (!parsed.success) {
+    return { ok: false, error: firstIssueMessage(parsed.error.issues) };
+  }
+
+  const profile = await getProfile();
+  if (!profile || profile.role !== "admin") {
+    return { ok: false, error: "Only admins can delete payments." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("sale_delete_payment", {
+    p_payment_id: parsed.data.payment_id,
+  });
+
+  if (error) {
+    return { ok: false, error: rpcErrorMessage(error, "Could not delete payment.") };
   }
 
   revalidatePath(`/sales/${parsed.data.sale_id}`);

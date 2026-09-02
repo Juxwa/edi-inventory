@@ -37,7 +37,11 @@ export default async function NewSalePage({ searchParams }: NewSalePageProps) {
 
   let branches: { id: string; name: string }[] = [];
   if (profile.role === "admin") {
-    const branchesResult = await supabase.from("branches").select("id, name").order("name");
+    const branchesResult = await supabase
+      .from("branches")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("name");
     branches = branchesResult.data ?? [];
   }
 

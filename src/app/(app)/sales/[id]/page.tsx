@@ -5,6 +5,7 @@ import { getProfile } from "@/lib/supabase/profile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ReturnDialog } from "@/components/sales/return-dialog";
+import { PaymentsCard } from "@/components/sales/payments-card";
 import { PrintButton } from "@/components/print-button";
 import { VoidedBanner } from "@/components/admin/voided-banner";
 import { VoidDialog } from "@/components/admin/void-dialog";
@@ -182,6 +183,41 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
     ((servicesResult.data as NameRow[] | null) ?? []).map((row: NameRow) => [row.id, row.name]),
   );
 
+  type PaymentQueryRow = {
+    id: string;
+    payment_date: string;
+    or_no: string | null;
+    method: string | null;
+    note: string | null;
+    amount: number;
+    received_by: string | null;
+  };
+  const { data: paymentData } = await supabase
+    .from("sale_payments")
+    .select("id, payment_date, or_no, method, note, amount, received_by")
+    .eq("sale_id", saleRow.id)
+    .order("payment_date")
+    .order("created_at");
+  const paymentRows: PaymentQueryRow[] = (paymentData as PaymentQueryRow[] | null) ?? [];
+
+  const receiverIds = Array.from(
+    new Set(
+      paymentRows
+        .map((row: PaymentQueryRow) => row.received_by)
+        .filter((rid: string | null): rid is string => rid !== null),
+    ),
+  );
+  let receiverNameById = new Map<string, string>();
+  if (receiverIds.length > 0) {
+    const { data: receiverRows } = await supabase
+      .from("profiles")
+      .select("id, name")
+      .in("id", receiverIds);
+    receiverNameById = new Map(
+      ((receiverRows as NameRow[] | null) ?? []).map((row: NameRow) => [row.id, row.name]),
+    );
+  }
+
   function lineName(line: LineRow): string {
     if (line.line_type === "service") {
       return line.service_id ? (serviceNameById.get(line.service_id) ?? "—") : "—";
@@ -211,6 +247,35 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const canReturn =
     !isVoided && (profile.role === "admin" || profile.branch_id === saleRow.branch_id);
   const isAdmin = profile.role === "admin";
+
+  // Payment math mirrors the sale_add_payment RPC / sales_balances view
+  // (0053): net = max(0, (vat_exempt ? gross / 1.12 : gross) - discount).
+  // A sale marked paid at recording with no payment rows counts as settled.
+  const round2 = (value: number) => Math.round(value * 100) / 100;
+  const paymentNet = Math.max(
+    0,
+    round2((saleRow.vat_exempt ? gross / 1.12 : gross) - discount),
+  );
+  const totalPaid = round2(
+    paymentRows.reduce((sum: number, row: PaymentQueryRow) => sum + row.amount, 0),
+  );
+  const balanceDue =
+    saleRow.is_paid && totalPaid === 0 ? 0 : Math.max(0, round2(paymentNet - totalPaid));
+  const canRecordPayment =
+    !isVoided &&
+    (profile.role === "admin" ||
+      (profile.role === "branch_rep" && profile.branch_id === saleRow.branch_id));
+  const paymentCardRows = paymentRows.map((row: PaymentQueryRow) => ({
+    id: row.id,
+    payment_date: row.payment_date,
+    or_no: row.or_no,
+    method: row.method,
+    note: row.note,
+    amount: row.amount,
+    received_by_name: row.received_by
+      ? (receiverNameById.get(row.received_by) ?? null)
+      : null,
+  }));
 
   return (
     <div className="flex flex-col gap-6">
@@ -491,6 +556,16 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
           )}
         </CardContent>
       </Card>
+
+      <PaymentsCard
+        saleId={saleRow.id}
+        payments={paymentCardRows}
+        netPayable={paymentNet}
+        paid={totalPaid}
+        balance={balanceDue}
+        canRecord={canRecordPayment}
+        isAdmin={isAdmin}
+      />
     </div>
   );
 }

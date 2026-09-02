@@ -27,6 +27,7 @@ export type SalesRowData = {
   lines: SalesLineData[];
   net: number;
   is_paid: boolean;
+  balance: number;
 };
 
 const currencyFormatter = new Intl.NumberFormat("en-PH", {
@@ -73,6 +74,7 @@ export function SalesTable({ rows }: { rows: SalesRowData[] }) {
             <TableHead>Serial no.</TableHead>
             <TableHead>Warranty expiry</TableHead>
             <TableHead className="text-right">Net</TableHead>
+            <TableHead className="text-right">Balance</TableHead>
             <TableHead>Paid</TableHead>
           </TableRow>
         </TableHeader>
@@ -124,9 +126,16 @@ export function SalesTable({ rows }: { rows: SalesRowData[] }) {
               <TableCell className="text-right tabular-nums">
                 {formatCurrency(row.net)}
               </TableCell>
+              <TableCell
+                className={`text-right tabular-nums ${row.balance > 0 ? "font-medium text-destructive" : "text-muted-foreground"}`}
+              >
+                {row.balance > 0 ? formatCurrency(row.balance) : "—"}
+              </TableCell>
               <TableCell>
                 {row.is_paid ? (
                   <Badge variant="success">Paid</Badge>
+                ) : row.balance > 0 && row.balance < row.net ? (
+                  <Badge variant="warning">Partial</Badge>
                 ) : (
                   <Badge variant="warning">Unpaid</Badge>
                 )}

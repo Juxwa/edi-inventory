@@ -23,7 +23,7 @@ export default async function StockIntakePage() {
       .select("id, name, code, has_serial, supplier_id")
       .eq("archived", false)
       .order("name"),
-    supabase.from("branches").select("id, name").order("name"),
+    supabase.from("branches").select("id, name").eq("is_active", true).order("name"),
     supabase
       .from("suppliers")
       .select("id, name")

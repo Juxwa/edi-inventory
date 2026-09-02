@@ -27,7 +27,7 @@ export default async function NewRepairPage() {
 
   const [branchesResult, customersResult, techniciansResult, linesResult] =
     await Promise.all([
-      supabase.from("branches").select("id, name").order("name"),
+      supabase.from("branches").select("id, name").eq("is_active", true).order("name"),
       supabase
         .from("customers")
         .select("id, name, mobile_no")

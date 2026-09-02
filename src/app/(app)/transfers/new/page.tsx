@@ -12,7 +12,11 @@ export default async function NewTransferPage() {
   }
 
   const supabase = await createClient();
-  const { data } = await supabase.from("branches").select("id, name").order("name");
+  const { data } = await supabase
+    .from("branches")
+    .select("id, name")
+    .eq("is_active", true)
+    .order("name");
   const branches: { id: string; name: string }[] = data ?? [];
 
   // branch_rep and technical are pinned to their own branch as the origin —

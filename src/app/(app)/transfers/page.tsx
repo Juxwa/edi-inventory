@@ -66,9 +66,9 @@ export default async function TransfersPage({
 
   const branchesResult = await supabase
     .from("branches")
-    .select("id, name")
+    .select("id, name, is_active")
     .order("name");
-  const branches: { id: string; name: string }[] = branchesResult.data ?? [];
+  const branches: { id: string; name: string; is_active: boolean }[] = branchesResult.data ?? [];
 
   let query = supabase
     .from("transfers")
@@ -92,7 +92,7 @@ export default async function TransfersPage({
   const rows: TransferQueryRow[] = (data as TransferQueryRow[] | null) ?? [];
 
   const branchNameById = new Map<string, string>(
-    branches.map((branch: { id: string; name: string }) => [
+    branches.map((branch: { id: string; name: string; is_active: boolean }) => [
       branch.id,
       branch.name,
     ]),
@@ -197,9 +197,10 @@ export default async function TransfersPage({
                 <SelectValue placeholder="All branches" />
               </SelectTrigger>
               <SelectContent>
-                {branches.map((branch: { id: string; name: string }) => (
+                {branches.map((branch: { id: string; name: string; is_active: boolean }) => (
                   <SelectItem key={branch.id} value={branch.id}>
                     {branch.name}
+                    {branch.is_active ? "" : " (closed)"}
                   </SelectItem>
                 ))}
               </SelectContent>

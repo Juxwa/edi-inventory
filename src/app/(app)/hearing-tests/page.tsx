@@ -38,7 +38,7 @@ type HearingTestsPageProps = {
   }>;
 };
 
-type BranchRow = { id: string; name: string };
+type BranchRow = { id: string; name: string; is_active: boolean };
 type CustomerIdRow = { id: string };
 type CustomerRow = { id: string; name: string; branch_created_id: string | null };
 type ProfileRow = { id: string; name: string | null };
@@ -65,7 +65,7 @@ export default async function HearingTestsPage({ searchParams }: HearingTestsPag
   const supabase = await createClient();
 
   const [branchesResult, customerIds] = await Promise.all([
-    supabase.from("branches").select("id, name").order("name"),
+    supabase.from("branches").select("id, name, is_active").order("name"),
     (async (): Promise<string[] | null> => {
       if (!filters.branch) return null;
       const { data } = await supabase
@@ -226,6 +226,7 @@ export default async function HearingTestsPage({ searchParams }: HearingTestsPag
               {branches.map((branch: BranchRow) => (
                 <SelectItem key={branch.id} value={branch.id}>
                   {branch.name}
+                  {branch.is_active ? "" : " (closed)"}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -91,11 +91,11 @@ export default async function InventoryPage({
     profile?.role === "admin" || profile?.role === "top_mgmt";
 
   const [branchesResult, categoriesResult] = await Promise.all([
-    supabase.from("branches").select("id, name").order("name"),
+    supabase.from("branches").select("id, name, is_active").order("name"),
     supabase.from("product_categories").select("id, name").order("name"),
   ]);
 
-  const branches: { id: string; name: string }[] = branchesResult.data ?? [];
+  const branches: { id: string; name: string; is_active: boolean }[] = branchesResult.data ?? [];
   const categories: { id: number; name: string }[] =
     categoriesResult.data ?? [];
 
@@ -246,9 +246,10 @@ export default async function InventoryPage({
                 <SelectValue placeholder="All branches" />
               </SelectTrigger>
               <SelectContent>
-                {branches.map((branch: { id: string; name: string }) => (
+                {branches.map((branch: { id: string; name: string; is_active: boolean }) => (
                   <SelectItem key={branch.id} value={branch.id}>
                     {branch.name}
+                    {branch.is_active ? "" : " (closed)"}
                   </SelectItem>
                 ))}
               </SelectContent>

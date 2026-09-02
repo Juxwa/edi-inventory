@@ -28,7 +28,11 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
   let activeBranchId: string | null = profile.branch_id;
 
   if (isAdmin) {
-    const branchesResult = await supabase.from("branches").select("id, name").order("name");
+    const branchesResult = await supabase
+      .from("branches")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("name");
     branches = branchesResult.data ?? [];
     const { branch: branchParam } = await searchParams;
     activeBranchId =
