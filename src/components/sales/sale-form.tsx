@@ -320,6 +320,7 @@ export function SaleForm({
   stockOptions,
   serviceOptions,
   role,
+  isPartnerBranch = false,
 }: {
   branches: { id: string; name: string }[];
   lockedBranchId: string | null;
@@ -327,18 +328,22 @@ export function SaleForm({
   stockOptions: SaleStockOption[];
   serviceOptions: SaleServiceOption[];
   role: "admin" | "branch_rep" | "top_mgmt" | "technical";
+  isPartnerBranch?: boolean;
 }) {
   const [state, formAction, pending] = useActionState<
     SaleActionState,
     FormData
   >(recordSale, initialSaleState);
 
-  // Branch reps sell at SRP only — line prices pre-fill from products.srp /
-  // service_pricing (see handleAddStock/handleAddService below) and are
-  // read-only here. Admin may still edit line prices. The server re-derives
-  // prices from SRP for branch_rep regardless of what's submitted (see
-  // recordSale in actions.ts) — this is UI convenience, not the trust boundary.
-  const linePricesLocked = role === "branch_rep";
+  // Branch reps at company branches sell at SRP only — line prices pre-fill
+  // from products.srp / service_pricing (see handleAddStock/handleAddService
+  // below) and are read-only here. Branch reps at PARTNER branches
+  // (isPartnerBranch) run their own SRP, so they get an editable price that
+  // still prefills the same default. Admin may always edit line prices. The
+  // server re-derives prices from SRP for branch_rep at non-partner branches
+  // regardless of what's submitted (see recordSale in actions.ts) — this is
+  // UI convenience, not the trust boundary.
+  const linePricesLocked = role === "branch_rep" && !isPartnerBranch;
 
   const [selectedCustomer, setSelectedCustomer] =
     useState<SaleCustomerOption | null>(null);
@@ -698,7 +703,9 @@ export function SaleForm({
                               ? "Freebie — price locked at 0"
                               : linePricesLocked
                                 ? "SRP — locked"
-                                : undefined
+                                : isPartnerBranch
+                                  ? "Suggested price — editable"
+                                  : undefined
                           }
                           onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
                             handleLineChange(line.key, "unit_price", event.target.value)
@@ -879,7 +886,9 @@ export function SaleForm({
             number; this is display-only. */}
         <div className="flex flex-col items-end gap-2 text-sm">
           <div className="flex w-full max-w-xs items-center justify-between">
-            <span className="text-muted-foreground">Items total (SRP)</span>
+            <span className="text-muted-foreground">
+              Items total {isPartnerBranch ? "" : "(SRP)"}
+            </span>
             <span className="font-medium tabular-nums">{formatCurrency(gross)}</span>
           </div>
           <div className="flex w-full max-w-xs items-center justify-between">

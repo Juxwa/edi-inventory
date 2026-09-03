@@ -176,12 +176,24 @@ export async function recordSale(
     is_freebie: line.is_freebie ?? false,
   }));
 
-  // Line prices = SRP from the system. branch_rep cannot edit unit_price —
-  // the client already disables the input, but that's UI-only, so the
-  // server re-derives every line's price from products.srp / service_pricing
-  // for this role and overwrites whatever was submitted. Admin (and other
-  // roles) stay trusted to submit their own line prices.
-  if (profile.role === "branch_rep") {
+  // Partner branches (branches.is_partner) run their own SRP, so their
+  // branch_rep users are trusted to submit their own line prices — same as
+  // admin. Derived from data.branch_id server-side (branch_rep can only ever
+  // submit their own branch anyway, since the form hardcodes it for them).
+  const { data: saleBranch } = await supabase
+    .from("branches")
+    .select("is_partner")
+    .eq("id", data.branch_id)
+    .single();
+  const isPartnerBranch = saleBranch?.is_partner === true;
+
+  // Line prices = SRP from the system. branch_rep at a company (non-partner)
+  // branch cannot edit unit_price — the client already disables the input,
+  // but that's UI-only, so the server re-derives every line's price from
+  // products.srp / service_pricing for this role and overwrites whatever was
+  // submitted. Admin (and other roles) stay trusted to submit their own line
+  // prices, as do branch_rep users at partner branches.
+  if (profile.role === "branch_rep" && !isPartnerBranch) {
     const stockIds = lines
       .filter((line: PreparedLine) => line.line_type === "stock" && line.stock_id)
       .map((line: PreparedLine) => line.stock_id as string);

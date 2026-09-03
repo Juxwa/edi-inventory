@@ -48,6 +48,19 @@ export default async function NewSalePage({ searchParams }: NewSalePageProps) {
   const activeBranchId =
     lockedBranchId ?? (branch && branch.length > 0 ? branch : (branches[0]?.id ?? null));
 
+  // Partner branches set their own SRP — their branch_rep gets editable line
+  // prices (see sale-form.tsx / recordSale in actions.ts). Admin prices are
+  // already editable regardless, so this only matters for branch_rep.
+  let isPartnerBranch = false;
+  if (profile.role === "branch_rep" && lockedBranchId) {
+    const { data: branchRow } = await supabase
+      .from("branches")
+      .select("is_partner")
+      .eq("id", lockedBranchId)
+      .single();
+    isPartnerBranch = branchRow?.is_partner === true;
+  }
+
   const [customersResult, servicesResult, servicePricingResult, productsResult] =
     await Promise.all([
       supabase
@@ -160,6 +173,7 @@ export default async function NewSalePage({ searchParams }: NewSalePageProps) {
             stockOptions={stockOptions}
             serviceOptions={serviceOptions}
             role={profile.role}
+            isPartnerBranch={isPartnerBranch}
           />
         ) : (
           <p className="text-sm text-muted-foreground">
