@@ -249,13 +249,13 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const isAdmin = profile.role === "admin";
 
   // Payment math mirrors the sale_add_payment RPC / sales_balances view
-  // (0053): net = max(0, (vat_exempt ? gross / 1.12 : gross) - discount).
+  // (0056): the / 1.12 base applies ONLY to SC/PWD (their discount is
+  // computed off the VAT-removed base). Every other mode — including
+  // VAT-exempt final_price sales — pays gross - discount; using vat_exempt
+  // here stripped VAT twice on final-price VAT-exempt sales.
   // A sale marked paid at recording with no payment rows counts as settled.
   const round2 = (value: number) => Math.round(value * 100) / 100;
-  const paymentNet = Math.max(
-    0,
-    round2((saleRow.vat_exempt ? gross / 1.12 : gross) - discount),
-  );
+  const paymentNet = round2(netPayable);
   const totalPaid = round2(
     paymentRows.reduce((sum: number, row: PaymentQueryRow) => sum + row.amount, 0),
   );

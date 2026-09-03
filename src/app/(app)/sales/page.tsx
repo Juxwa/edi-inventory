@@ -43,6 +43,7 @@ type SaleQueryRow = {
   branch_id: string;
   discount: number | null;
   vat_exempt: boolean | null;
+  discount_type: string | null;
   is_paid: boolean;
 };
 
@@ -128,7 +129,7 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
 
   let query = supabase
     .from("sales")
-    .select("id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, discount, vat_exempt, is_paid", {
+    .select("id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, discount, vat_exempt, discount_type, is_paid", {
       count: "exact",
     })
     .is("voided_at", null)
@@ -258,10 +259,13 @@ export default async function SalesPage({ searchParams }: SalesPageProps) {
 
   const sales: SalesRowData[] = rows.map((row: SaleQueryRow) => {
     const totals = lineTotalsBySaleId.get(row.id) ?? { gross: 0, lines: [] };
-    // VAT-exempt sales (SC/PWD): the stored discount applies to the
-    // VAT-removed base (gross / 1.12), so net payable must start there —
-    // otherwise the list overstates by exactly the exempted VAT.
-    const netBase = row.vat_exempt ? totals.gross / 1.12 : totals.gross;
+    // SC/PWD only: their stored discount applies to the VAT-removed base
+    // (gross / 1.12), so net payable starts there. All other modes —
+    // including VAT-exempt final_price sales — pay gross - discount; keying
+    // on vat_exempt here stripped VAT twice on final-price VAT-exempt sales.
+    const isScOrPwd =
+      row.discount_type === "senior_citizen" || row.discount_type === "pwd";
+    const netBase = isScOrPwd ? totals.gross / 1.12 : totals.gross;
     const net = Math.max(0, netBase - (row.discount ?? 0));
     return {
       id: row.id,
