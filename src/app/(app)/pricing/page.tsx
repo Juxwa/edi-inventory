@@ -27,6 +27,19 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
   let branches: { id: string; name: string }[] = [];
   let activeBranchId: string | null = profile.branch_id;
 
+  // Management rule (0057): only HQ (admin) edits pricing for company-owned
+  // branches; partner branches manage their own. Non-admin at a non-partner
+  // branch gets a read-only view (RLS enforces this server-side too).
+  let readOnly = false;
+  if (!isAdmin && profile.branch_id) {
+    const { data: branchRow } = await supabase
+      .from("branches")
+      .select("is_partner")
+      .eq("id", profile.branch_id)
+      .single();
+    readOnly = !(branchRow?.is_partner ?? false);
+  }
+
   if (isAdmin) {
     const branchesResult = await supabase
       .from("branches")
@@ -76,7 +89,9 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
         <div>
           <h1 className="text-lg font-semibold">Service pricing</h1>
           <p className="text-sm text-muted-foreground">
-            Prices set here prefill service lines on sales at your branch.
+            {readOnly
+              ? "Prices for your branch are managed by HQ. They prefill service lines on sales."
+              : "Prices set here prefill service lines on sales at your branch."}
           </p>
         </div>
         {isAdmin ? <AddServiceDialog /> : null}
@@ -115,7 +130,7 @@ export default async function PricingPage({ searchParams }: PricingPageProps) {
       )}
 
       {activeBranchId ? (
-        <ServicePricingTable rows={rows} branchId={activeBranchId} />
+        <ServicePricingTable rows={rows} branchId={activeBranchId} readOnly={readOnly} />
       ) : (
         <p className="text-sm text-muted-foreground">
           {isAdmin ? "Select a branch to manage its pricing." : "No branch on this account."}

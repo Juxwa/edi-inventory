@@ -93,6 +93,20 @@ export async function setServicePrice(
   }
 
   const supabase = await createClient();
+
+  // Management rule (0057): non-partner (company-owned) branch pricing is
+  // HQ-only. RLS enforces this too; this check just gives a clear message.
+  if (!isAdmin) {
+    const { data: branchRow } = await supabase
+      .from("branches")
+      .select("is_partner")
+      .eq("id", effectiveBranchId)
+      .single();
+    if (!(branchRow?.is_partner ?? false)) {
+      return { ok: false, error: "Prices for company branches are managed by HQ." };
+    }
+  }
+
   const { error } = await supabase.from("service_pricing").upsert(
     {
       branch_id: effectiveBranchId,
@@ -137,6 +151,19 @@ export async function clearServicePrice(
   }
 
   const supabase = await createClient();
+
+  // Management rule (0057): non-partner branch pricing is HQ-only.
+  if (!isAdmin) {
+    const { data: branchRow } = await supabase
+      .from("branches")
+      .select("is_partner")
+      .eq("id", effectiveBranchId)
+      .single();
+    if (!(branchRow?.is_partner ?? false)) {
+      return { ok: false, error: "Prices for company branches are managed by HQ." };
+    }
+  }
+
   const { error } = await supabase
     .from("service_pricing")
     .delete()

@@ -109,10 +109,13 @@ function PriceRow({
 export function ServicePricingTable({
   rows,
   branchId,
+  readOnly = false,
 }: {
   rows: ServicePricingRow[];
   branchId: string;
+  readOnly?: boolean;
 }) {
+  const columnCount = readOnly ? 2 : 4;
   return (
     <div className="rounded-lg border border-border">
       <Table>
@@ -120,17 +123,30 @@ export function ServicePricingTable({
           <TableRow>
             <TableHead>Service</TableHead>
             <TableHead>Current price</TableHead>
-            <TableHead className="text-right">New price</TableHead>
-            <TableHead className="w-44" />
+            {readOnly ? null : (
+              <>
+                <TableHead className="text-right">New price</TableHead>
+                <TableHead className="w-44" />
+              </>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={4} className="text-center text-muted-foreground">
+              <TableCell colSpan={columnCount} className="text-center text-muted-foreground">
                 No services found.
               </TableCell>
             </TableRow>
+          ) : readOnly ? (
+            rows.map((row: ServicePricingRow) => (
+              <TableRow key={row.id}>
+                <TableCell className="font-medium">{row.name}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {row.price !== null ? formatCurrency(row.price) : "Not set"}
+                </TableCell>
+              </TableRow>
+            ))
           ) : (
             rows.map((row: ServicePricingRow) => (
               <PriceRow key={row.id} row={row} branchId={branchId} />
