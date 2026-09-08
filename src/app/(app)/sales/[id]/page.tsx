@@ -37,6 +37,7 @@ type SaleDetailRow = {
   csi_no: string | null;
   ci_no: string | null;
   referred_by: string | null;
+  sold_by: string | null;
   discount: number | null;
   vat_amount: number | null;
   vat_exempt: boolean | null;
@@ -122,7 +123,7 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const { data: sale, error: saleError } = await supabase
     .from("sales")
     .select(
-      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, discount, vat_amount, vat_exempt, discount_type, discount_id_no, is_paid, voided_at, voided_by, void_reason",
+      "id, customer_id, branch_id, sale_date, or_no, csi_no, ci_no, referred_by, sold_by, discount, vat_amount, vat_exempt, discount_type, discount_id_no, is_paid, voided_at, voided_by, void_reason",
     )
     .eq("id", id)
     .single();
@@ -133,7 +134,8 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
 
   const saleRow = sale as SaleDetailRow;
 
-  const [branchResult, customerResult, lineResult, voidedByResult] = await Promise.all([
+  const [branchResult, customerResult, lineResult, voidedByResult, soldByResult] =
+    await Promise.all([
     supabase.from("branches").select("id, name").eq("id", saleRow.branch_id).single(),
     saleRow.customer_id
       ? supabase
@@ -151,11 +153,15 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
     saleRow.voided_by
       ? supabase.from("profiles").select("name").eq("id", saleRow.voided_by).maybeSingle()
       : Promise.resolve({ data: null }),
+    saleRow.sold_by
+      ? supabase.from("profiles").select("name").eq("id", saleRow.sold_by).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const branchName: string = (branchResult.data as { name: string } | null)?.name ?? "—";
   const customer = customerResult.data as CustomerRow | null;
   const voidedByName = (voidedByResult.data as { name: string } | null)?.name ?? null;
+  const soldByName = (soldByResult.data as { name: string } | null)?.name ?? null;
 
   const lines: LineRow[] = (lineResult.data as LineRow[] | null) ?? [];
 
@@ -374,6 +380,10 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
           <div>
             <p className="text-muted-foreground">Referred by</p>
             <p className="font-medium">{saleRow.referred_by ?? "—"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Recorded by</p>
+            <p className="font-medium">{soldByName ?? "—"}</p>
           </div>
           <div>
             <p className="text-muted-foreground">Discount</p>
