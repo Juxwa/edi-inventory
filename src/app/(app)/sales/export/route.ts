@@ -25,6 +25,7 @@ type SaleQueryRow = {
   discount: number | null;
   discount_type: string | null;
   discount_id_no: string | null;
+  vat_amount: number | null;
   vat_exempt: boolean | null;
   is_paid: boolean;
   voided_at: string | null;
@@ -113,7 +114,7 @@ export async function GET(request: Request): Promise<Response> {
     let salesQuery = supabase
       .from("sales")
       .select(
-        "id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, sold_by, referred_by, discount, discount_type, discount_id_no, vat_exempt, is_paid, voided_at",
+        "id, sale_date, or_no, csi_no, ci_no, customer_id, branch_id, sold_by, referred_by, discount, discount_type, discount_id_no, vat_amount, vat_exempt, is_paid, voided_at",
       )
       .order("sale_date", { ascending: false })
       .order("id", { ascending: false })
@@ -317,6 +318,13 @@ export async function GET(request: Request): Promise<Response> {
     {
       header: "Discount ID no.",
       value: (row) => (row.isFirstLineOfSale ? row.sale.discount_id_no : ""),
+    },
+    {
+      // Header-level like Discount: printed on the sale's first line only so
+      // summing the column doesn't double-count. Stored 0 on VAT-exempt
+      // sales; null on legacy imports that never captured it.
+      header: "VAT amount",
+      value: (row) => (row.isFirstLineOfSale ? (row.sale.vat_amount ?? "") : ""),
     },
     {
       header: "VAT-exempt",
