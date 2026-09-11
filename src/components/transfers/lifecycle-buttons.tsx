@@ -4,7 +4,7 @@ import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { reserveTransfer, deleteDraft } from "@/app/(app)/transfers/actions";
+import { reserveTransfer, unreserveTransfer, deleteDraft } from "@/app/(app)/transfers/actions";
 import {
   initialTransferState,
   type TransferActionState,
@@ -31,6 +31,43 @@ export function ReserveButton({ transferId }: { transferId: string }) {
       <input type="hidden" name="transfer_id" value={transferId} />
       <Button type="submit" disabled={pending}>
         {pending ? "Reserving..." : "Reserve"}
+      </Button>
+    </form>
+  );
+}
+
+export function UnreserveButton({ transferId }: { transferId: string }) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState<
+    TransferActionState,
+    FormData
+  >(unreserveTransfer, initialTransferState);
+
+  useEffect(() => {
+    if (state.ok) {
+      toast.success("Reservation released — transfer is back to draft.");
+      router.refresh();
+    } else if (state.error) {
+      toast.error(state.error);
+    }
+  }, [state, router]);
+
+  return (
+    <form
+      action={formAction}
+      onSubmit={(event: React.FormEvent<HTMLFormElement>) => {
+        if (
+          !window.confirm(
+            "Release the reserved stock and return this transfer to draft?",
+          )
+        ) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="transfer_id" value={transferId} />
+      <Button type="submit" variant="outline" disabled={pending}>
+        {pending ? "Releasing..." : "Unreserve"}
       </Button>
     </form>
   );

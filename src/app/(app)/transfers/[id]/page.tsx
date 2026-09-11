@@ -24,7 +24,7 @@ import {
 import { ReceivePanel, type ReceiveLineRowData } from "@/components/transfers/receive-panel";
 import { ChatThread } from "@/components/chat/chat-thread";
 import { DispatchDialog } from "@/components/transfers/dispatch-dialog";
-import { ReserveButton, DeleteDraftButton } from "@/components/transfers/lifecycle-buttons";
+import { ReserveButton, UnreserveButton, DeleteDraftButton } from "@/components/transfers/lifecycle-buttons";
 import { PrintButton } from "@/components/print-button";
 import { VoidedBanner } from "@/components/admin/voided-banner";
 import { VoidDialog } from "@/components/admin/void-dialog";
@@ -252,7 +252,10 @@ export default async function TransferDetailPage({
             </>
           ) : null}
           {transferRow.status === "reserved" && canManageDraft ? (
-            <DispatchDialog transferId={transferRow.id} />
+            <>
+              <DispatchDialog transferId={transferRow.id} />
+              <UnreserveButton transferId={transferRow.id} />
+            </>
           ) : null}
           {isAdmin && transferRow.status === "confirmed" && !transferRow.reversed_at ? (
             <VoidDialog

@@ -233,6 +233,36 @@ export async function reserveTransfer(
   return { ok: true };
 }
 
+// Releases a reserved (not yet dispatched) transfer back to draft:
+// transfer_unreserve (0058) flips the lines' reserved stock rows back to
+// 'available'. From draft, the existing delete-draft flow completes a
+// full cancellation.
+export async function unreserveTransfer(
+  _prevState: TransferActionState,
+  formData: FormData,
+): Promise<TransferActionState> {
+  const parsed = reserveTransferSchema.safeParse({
+    transfer_id: formData.get("transfer_id"),
+  });
+
+  if (!parsed.success) {
+    return { ok: false, error: firstIssueMessage(parsed.error.issues) };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("transfer_unreserve", {
+    p_transfer_id: parsed.data.transfer_id,
+  });
+
+  if (error) {
+    return { ok: false, error: rpcErrorMessage(error, "Could not unreserve transfer.") };
+  }
+
+  revalidatePath(`/transfers/${parsed.data.transfer_id}`);
+  revalidatePath("/transfers");
+  return { ok: true };
+}
+
 export async function dispatchTransfer(
   _prevState: TransferActionState,
   formData: FormData,
