@@ -1,5 +1,5 @@
 import type { createClient } from "@/lib/supabase/server";
-import { fetchAllPages } from "@/lib/paged";
+import { fetchAllPages, ID_CHUNK } from "@/lib/paged";
 
 // Shared between page.tsx and export/route.ts so filters can't drift.
 
@@ -20,6 +20,7 @@ export type MovementFilters = {
   to: string;
   type: string; // "" = all
   branch: string; // "" = all visible
+  serial: string; // "" = no serial filter
 };
 
 function isoDate(date: Date): string {
@@ -34,6 +35,7 @@ export function parseMovementFilters(params: {
   to?: string;
   type?: string;
   branch?: string;
+  serial?: string;
 }): MovementFilters {
   const now = new Date();
   const defaultFrom = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
@@ -42,6 +44,7 @@ export function parseMovementFilters(params: {
     to: params.to?.trim() || isoDate(now),
     type: params.type?.trim() ?? "",
     branch: params.branch?.trim() ?? "",
+    serial: params.serial?.trim() ?? "",
   };
 }
 
@@ -61,6 +64,25 @@ export type MovementRow = {
 };
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
+
+// Resolves a serial search into stock ids through stock_visible, so the
+// lookup stays branch-scoped and cost-private the same way the rest of the
+// app reads stock. Capped at ID_CHUNK: this is a narrow serial lookup (a
+// handful of matches expected), not a bulk export — keeping the id list
+// bounded keeps the follow-up .in() filter URL-length safe.
+async function resolveSerialStockIds(
+  supabase: Supabase,
+  serial: string,
+): Promise<string[]> {
+  const { data } = await supabase
+    .from("stock_visible")
+    .select("id")
+    .ilike("serial_number", `%${serial}%`)
+    .limit(ID_CHUNK);
+  return ((data as { id: string }[] | null) ?? []).map(
+    (row: { id: string }) => row.id,
+  );
+}
 
 // List-page fetch (one page at a time, `range` supplied by the caller).
 // Order includes `id` as a tiebreaker after occurred_at, since timestamps
@@ -84,6 +106,11 @@ export async function fetchMovements(
     .order("id", { ascending: false });
   if (filters.type) query = query.eq("movement_type", filters.type);
   if (filters.branch) query = query.eq("branch_id", filters.branch);
+  if (filters.serial) {
+    const stockIds = await resolveSerialStockIds(supabase, filters.serial);
+    if (stockIds.length === 0) return { rows: [], count: 0 };
+    query = query.in("stock_id", stockIds);
+  }
   if (range) query = query.range(range.from, range.to);
   const { data, count } = await query;
   return { rows: (data as MovementRow[] | null) ?? [], count: count ?? 0 };
@@ -97,6 +124,11 @@ export async function fetchAllMovements(
   supabase: Supabase,
   filters: MovementFilters,
 ): Promise<MovementRow[]> {
+  let stockIds: string[] | null = null;
+  if (filters.serial) {
+    stockIds = await resolveSerialStockIds(supabase, filters.serial);
+    if (stockIds.length === 0) return [];
+  }
   return fetchAllPages<MovementRow>((from: number, to: number) => {
     let query = supabase
       .from("movements_ledger")
@@ -110,6 +142,7 @@ export async function fetchAllMovements(
       .range(from, to);
     if (filters.type) query = query.eq("movement_type", filters.type);
     if (filters.branch) query = query.eq("branch_id", filters.branch);
+    if (stockIds) query = query.in("stock_id", stockIds);
     return query;
   });
 }

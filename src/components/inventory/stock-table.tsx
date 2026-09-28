@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   Table,
   TableBody,
@@ -120,10 +121,16 @@ export function StockTable({
         <TableBody>
           {rows.map((row: StockRowData) => (
             <TableRow key={row.id}>
-              <TableCell className="font-medium">{row.product_name}</TableCell>
+              <TableCell className="font-medium">
+                <Link href={`/inventory/${row.id}`} className="hover:underline">
+                  {row.product_name}
+                </Link>
+              </TableCell>
               <TableCell className="text-muted-foreground">
                 <div className="flex items-center gap-1">
-                  {row.serial_number ?? "—"}
+                  <Link href={`/inventory/${row.id}`} className="hover:underline">
+                    {row.serial_number ?? "—"}
+                  </Link>
                   {showAdminActions ? (
                     <SerialCorrectDialog
                       scope="stock"

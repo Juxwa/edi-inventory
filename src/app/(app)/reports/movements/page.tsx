@@ -40,6 +40,7 @@ type MovementsPageProps = {
     to?: string;
     type?: string;
     branch?: string;
+    serial?: string;
     page?: string;
   }>;
 };
@@ -68,6 +69,7 @@ export default async function MovementsReportPage({
     to: params.to,
     type: params.type,
     branch: canFilterBranch ? params.branch : undefined,
+    serial: params.serial,
   });
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
@@ -118,6 +120,7 @@ export default async function MovementsReportPage({
     next.set("to", filters.to);
     if (filters.type) next.set("type", filters.type);
     if (filters.branch) next.set("branch", filters.branch);
+    if (filters.serial) next.set("serial", filters.serial);
     next.set("page", String(targetPage));
     return `/reports/movements?${next.toString()}`;
   }
@@ -127,6 +130,7 @@ export default async function MovementsReportPage({
   exportParams.set("to", filters.to);
   if (filters.type) exportParams.set("type", filters.type);
   if (filters.branch) exportParams.set("branch", filters.branch);
+  if (filters.serial) exportParams.set("serial", filters.serial);
 
   return (
     <div className="flex flex-col gap-6">
@@ -175,6 +179,18 @@ export default async function MovementsReportPage({
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <label htmlFor="serial" className="text-sm font-medium">
+            Serial
+          </label>
+          <Input
+            id="serial"
+            name="serial"
+            defaultValue={filters.serial}
+            placeholder="Serial number"
+            className="w-40"
+          />
         </div>
         {canFilterBranch ? (
           <div className="grid gap-1.5">

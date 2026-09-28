@@ -22,6 +22,7 @@ export async function GET(request: Request): Promise<Response> {
     branch: canFilterBranch
       ? (url.searchParams.get("branch") ?? undefined)
       : undefined,
+    serial: url.searchParams.get("serial") ?? undefined,
   });
 
   const supabase = await createClient();
