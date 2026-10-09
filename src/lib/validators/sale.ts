@@ -8,13 +8,6 @@ export type SaleActionState = {
 
 export const initialSaleState: SaleActionState = { ok: false };
 
-export type ReturnActionState = {
-  ok: boolean;
-  error?: string;
-};
-
-export const initialReturnState: ReturnActionState = { ok: false };
-
 // Converts a possibly-empty form string into trimmed text or null.
 function toOptionalText(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -55,11 +48,6 @@ function toNumberOrNull(value: unknown): unknown {
   const parsed = Number.parseFloat(text);
   return Number.isNaN(parsed) ? text : parsed;
 }
-
-const positiveQuantity = z.preprocess(
-  toNumberOrNull,
-  z.number().positive("Quantity must be greater than zero"),
-);
 
 const optionalNonNegativeNumber = z.preprocess(
   toNumberOrNull,
@@ -246,14 +234,6 @@ export const saleSubmissionMetaSchema = z.object({
   confirm_trigger: optionalTrigger,
 });
 export type SaleSubmissionMeta = z.infer<typeof saleSubmissionMetaSchema>;
-
-export const returnSaleLineSchema = z.object({
-  line_id: requiredUuid,
-  sale_id: requiredUuid,
-  quantity: positiveQuantity,
-  note: optionalText,
-});
-export type ReturnSaleLineInput = z.infer<typeof returnSaleLineSchema>;
 
 export const AFTER_SALES_STATUSES = [
   "sold",

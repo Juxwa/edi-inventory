@@ -29,12 +29,6 @@ const requiredSerial = z.preprocess(
   z.string({ required_error: "New serial is required." }).min(1, "New serial is required."),
 );
 
-export const saleVoidSchema = z.object({
-  sale_id: requiredUuid,
-  reason: requiredReason,
-});
-export type SaleVoidInput = z.infer<typeof saleVoidSchema>;
-
 export const intakeVoidSchema = z.object({
   stock_id: requiredUuid,
   reason: requiredReason,

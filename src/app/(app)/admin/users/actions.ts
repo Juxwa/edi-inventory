@@ -52,6 +52,24 @@ function siteUrl(): string {
   return process.env.SITE_URL ?? "http://localhost:3000";
 }
 
+// HQ staff approve branch requests, so the role is only valid on the
+// head-office branch (auth_approver_tier() in the database checks the same).
+async function hqStaffBranchError(
+  admin: ReturnType<typeof createAdminClient>,
+  role: string,
+  branchId: string | null,
+): Promise<string | null> {
+  if (role !== "hq_staff") return null;
+  const { data } = await admin
+    .from("branches")
+    .select("is_head_office")
+    .eq("id", branchId ?? "")
+    .maybeSingle();
+  return data?.is_head_office === true
+    ? null
+    : "HQ staff must be assigned to the head-office branch.";
+}
+
 export async function inviteUser(
   _prevState: UserActionState,
   formData: FormData,
@@ -70,6 +88,9 @@ export async function inviteUser(
   }
 
   const admin = createAdminClient();
+  const branchError = await hqStaffBranchError(admin, parsed.data.role, parsed.data.branch_id);
+  if (branchError) return { ok: false, error: branchError };
+
   const { data, error } = await admin.auth.admin.inviteUserByEmail(
     parsed.data.email,
     { redirectTo: `${siteUrl()}/reset-password` },
@@ -118,6 +139,9 @@ export async function updateUserProfile(
   }
 
   const admin = createAdminClient();
+  const branchError = await hqStaffBranchError(admin, parsed.data.role, parsed.data.branch_id);
+  if (branchError) return { ok: false, error: branchError };
+
   const { error } = await admin
     .from("profiles")
     .update({

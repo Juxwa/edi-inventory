@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import type { Profile } from "@/lib/supabase/profile";
+import type { ApproverTier, Profile } from "@/lib/supabase/profile";
 
 type NavItem = {
   href: string;
   label: string;
   roles: Profile["role"][];
+  // Shown to approvers (HQ staff / supervisor) regardless of roles, with
+  // this label and the pending-request count.
+  approverLabel?: string;
 };
 
 type NavSection = {
@@ -148,6 +151,17 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    section: "Corrections",
+    items: [
+      {
+        href: "/approvals",
+        label: "Void & return requests",
+        approverLabel: "Approvals",
+        roles: ["admin", "branch_rep", "top_mgmt"],
+      },
+    ],
+  },
+  {
     section: "Admin",
     items: [
       {
@@ -179,12 +193,24 @@ const NAV: NavSection[] = [
   },
 ];
 
-export function Nav({ role }: { role: Profile["role"] }) {
+export function Nav({
+  role,
+  approver = null,
+  pendingApprovals = 0,
+}: {
+  role: Profile["role"];
+  approver?: ApproverTier | null;
+  // Requests waiting for a decision; only shown to approvers.
+  pendingApprovals?: number;
+}) {
   const pathname = usePathname();
 
   const sections = NAV.map((section) => ({
     ...section,
-    items: section.items.filter((item) => item.roles.includes(role)),
+    items: section.items.filter(
+      (item) =>
+        item.roles.includes(role) || (approver !== null && item.approverLabel !== undefined),
+    ),
   })).filter((section) => section.items.length > 0);
 
   return (
@@ -211,7 +237,12 @@ export function Nav({ role }: { role: Profile["role"] }) {
                         : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                     )}
                   >
-                    {item.label}
+                    {approver !== null && item.approverLabel ? item.approverLabel : item.label}
+                    {approver !== null && item.approverLabel && pendingApprovals > 0 ? (
+                      <span className="ml-auto rounded-full bg-destructive px-1.5 text-xs font-semibold leading-5 text-white tabular-nums">
+                        {pendingApprovals}
+                      </span>
+                    ) : null}
                   </Link>
                 </li>
               );

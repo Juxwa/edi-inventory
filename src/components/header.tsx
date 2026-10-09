@@ -23,6 +23,7 @@ const ROLE_LABEL: Record<Profile["role"], string> = {
   branch_rep: "Branch Rep",
   top_mgmt: "Top Management",
   technical: "Technical",
+  supervisor: "HQ Supervisor",
 };
 
 export function Header({ profile, branchName }: HeaderProps) {
@@ -35,7 +36,9 @@ export function Header({ profile, branchName }: HeaderProps) {
             <span aria-hidden="true">·</span>
           </>
         ) : null}
-        <span>{ROLE_LABEL[profile.role]}</span>
+        <span>
+          {profile.approver === "hq_staff" ? "HQ Staff" : ROLE_LABEL[profile.role]}
+        </span>
       </div>
 
       <div className="flex items-center gap-1">

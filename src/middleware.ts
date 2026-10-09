@@ -16,6 +16,10 @@ function isPublicPath(pathname: string) {
 }
 
 export async function middleware(request: NextRequest) {
+  // Lets server layouts know which page is being rendered (used by the
+  // approvals-only guard in the (app) layout).
+  request.headers.set("x-pathname", request.nextUrl.pathname);
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

@@ -136,8 +136,9 @@ export const GUIDES: Guide[] = [
         heading: "Processing a return",
         steps: [
           "Open the sale from Sales history.",
-          "Use the Return action on the line being returned and enter the returned quantity and date.",
-          "The item’s after-sales status is updated (returned or partially returned) and the stock record is adjusted.",
+          "Use Request return on the line being returned, enter the quantity and the reason, and send the request. To cancel a whole sale, use Request void at the top of the sale.",
+          "Nothing changes until head office approves the request. The sale shows a pending notice meanwhile; follow its status under Corrections → Void & return requests.",
+          "On approval the item’s after-sales status is updated (returned or partially returned) and the stock record is adjusted. If the request is rejected, the reason is shown with the request.",
         ],
       },
     ],
