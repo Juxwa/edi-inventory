@@ -2,15 +2,18 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/supabase/profile";
 import {
   recordSaleSchema,
   returnSaleLineSchema,
+  saleSubmissionMetaSchema,
   type SaleActionState,
   type ReturnActionState,
   type SaleLineInput,
   type RecordSaleInput,
+  type SaleSubmissionMeta,
 } from "@/lib/validators/sale";
 import {
   addSalePaymentSchema,
@@ -94,6 +97,74 @@ function computeDiscountAndVat(
   }
 }
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+
+type SubmissionClaim =
+  // Token is ours (or there is no guard): record the sale.
+  | { outcome: "claimed"; token: string | null }
+  // This form already produced a sale — a double submit.
+  | { outcome: "duplicate_recorded"; saleId: string }
+  // The first submit of this form is still running.
+  | { outcome: "in_progress" };
+
+// One-time form token (sale_submissions, migration 0060): the same form
+// instance can only ever record one sale, and every attempt is logged with
+// how it was triggered. FAILS OPEN on purpose — a missing token (stale
+// client bundle) or a guard error (migration not applied yet) records the
+// sale unguarded rather than blocking the counter.
+async function claimSubmission(
+  supabase: SupabaseServerClient,
+  meta: SaleSubmissionMeta,
+  branchId: string,
+  lineCount: number,
+): Promise<SubmissionClaim> {
+  const unguarded: SubmissionClaim = { outcome: "claimed", token: null };
+  if (!meta.submission_token) return unguarded;
+
+  const requestHeaders = await headers();
+  const { data, error } = await supabase.rpc("sale_submission_claim", {
+    p_token: meta.submission_token,
+    p_branch_id: branchId,
+    p_line_count: lineCount,
+    p_form_open_seconds: meta.form_open_seconds,
+    p_enter_blocked_count: meta.enter_blocked_count,
+    p_review_trigger: meta.review_trigger,
+    p_confirm_trigger: meta.confirm_trigger,
+    p_user_agent: requestHeaders.get("user-agent"),
+  });
+
+  if (error || !data || typeof data !== "object") {
+    console.error("sale_submission_claim failed; recording sale unguarded", error);
+    return unguarded;
+  }
+
+  const result = data as { outcome?: string; sale_id?: string | null };
+  if (result.outcome === "duplicate_recorded" && typeof result.sale_id === "string") {
+    return { outcome: "duplicate_recorded", saleId: result.sale_id };
+  }
+  if (result.outcome === "in_progress") {
+    return { outcome: "in_progress" };
+  }
+  return { outcome: "claimed", token: meta.submission_token };
+}
+
+// Closes the claimed token: recorded (saleId set) or failed (error set, which
+// releases the token so the operator can fix the form and submit it again).
+// Best-effort — a logging failure must not change the sale's outcome.
+async function finishSubmission(
+  supabase: SupabaseServerClient,
+  token: string | null,
+  result: { saleId?: string; error?: string },
+): Promise<void> {
+  if (!token) return;
+  const { error } = await supabase.rpc("sale_submission_finish", {
+    p_token: token,
+    p_sale_id: result.saleId ?? null,
+    p_error: result.error ?? null,
+  });
+  if (error) console.error("sale_submission_finish failed", error);
+}
+
 export async function recordSale(
   _prevState: SaleActionState,
   formData: FormData,
@@ -136,6 +207,34 @@ export async function recordSale(
 
   const supabase = await createClient();
 
+  // Claim the form's one-time token BEFORE anything is written (customer
+  // included), so a double submit of the same form cannot create a second
+  // sale or a second customer.
+  const submissionMeta = saleSubmissionMetaSchema.parse({
+    submission_token: formData.get("submission_token"),
+    form_open_seconds: formData.get("form_open_seconds"),
+    enter_blocked_count: formData.get("enter_blocked_count"),
+    review_trigger: formData.get("review_trigger"),
+    confirm_trigger: formData.get("confirm_trigger"),
+  });
+  const claim = await claimSubmission(
+    supabase,
+    submissionMeta,
+    data.branch_id,
+    data.lines.length,
+  );
+  if (claim.outcome === "duplicate_recorded") {
+    redirect(`/sales/${claim.saleId}`);
+  }
+  if (claim.outcome === "in_progress") {
+    return {
+      ok: false,
+      error:
+        "This sale is already being recorded. Check the Sales list before trying again.",
+    };
+  }
+  const submissionToken = claim.token;
+
   let customerId = data.customer_id;
 
   if (!customerId && data.new_customer_name) {
@@ -151,7 +250,9 @@ export async function recordSale(
       .single();
 
     if (customerError || !customer) {
-      return { ok: false, error: "Could not create customer." };
+      const message = "Could not create customer.";
+      await finishSubmission(supabase, submissionToken, { error: message });
+      return { ok: false, error: message };
     }
     customerId = customer.id;
   }
@@ -272,7 +373,9 @@ export async function recordSale(
     const finalPrice = data.final_price ?? 0;
     // Small epsilon for floating-point line-total sums.
     if (finalPrice - grossTotal > 0.005) {
-      return { ok: false, error: "final price exceeds item total" };
+      const message = "final price exceeds item total";
+      await finishSubmission(supabase, submissionToken, { error: message });
+      return { ok: false, error: message };
     }
   }
 
@@ -306,8 +409,12 @@ export async function recordSale(
   });
 
   if (error || typeof saleId !== "string") {
-    return { ok: false, error: rpcErrorMessage(error, "Could not record sale.") };
+    const message = rpcErrorMessage(error, "Could not record sale.");
+    await finishSubmission(supabase, submissionToken, { error: message });
+    return { ok: false, error: message };
   }
+
+  await finishSubmission(supabase, submissionToken, { saleId });
 
   revalidatePath("/sales");
   redirect(`/sales/${saleId}`);

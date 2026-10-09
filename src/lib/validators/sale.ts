@@ -221,6 +221,32 @@ export const recordSaleSchema = z
   });
 export type RecordSaleInput = z.infer<typeof recordSaleSchema>;
 
+// How a button was activated: a real pointer click, or the keyboard
+// (Enter/Space on a focused button — also what a barcode scanner's trailing
+// Enter looks like).
+export const SUBMIT_TRIGGERS = ["pointer", "keyboard"] as const;
+export type SubmitTrigger = (typeof SUBMIT_TRIGGERS)[number];
+
+const optionalCount = z
+  .preprocess(toNumberOrNull, z.number().int().min(0).max(1_000_000).nullable())
+  .catch(null);
+
+const optionalTrigger = z
+  .preprocess(toOptionalText, z.enum(SUBMIT_TRIGGERS).nullable())
+  .catch(null);
+
+// One-time form token + submit diagnostics sent alongside the sale (logged
+// in sale_submissions, migration 0060). Every field falls back to null
+// instead of failing: a missing or malformed value must never block a sale.
+export const saleSubmissionMetaSchema = z.object({
+  submission_token: z.preprocess(toOptionalText, z.string().uuid().nullable()).catch(null),
+  form_open_seconds: optionalCount,
+  enter_blocked_count: optionalCount,
+  review_trigger: optionalTrigger,
+  confirm_trigger: optionalTrigger,
+});
+export type SaleSubmissionMeta = z.infer<typeof saleSubmissionMetaSchema>;
+
 export const returnSaleLineSchema = z.object({
   line_id: requiredUuid,
   sale_id: requiredUuid,

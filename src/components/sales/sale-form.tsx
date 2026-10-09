@@ -1,9 +1,24 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import {
+  startTransition,
+  useActionState,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,6 +43,7 @@ import {
   DISCOUNT_TYPES,
   type SaleActionState,
   type DiscountType,
+  type SubmitTrigger,
 } from "@/lib/validators/sale";
 
 export type SaleCustomerOption = {
@@ -86,6 +102,21 @@ function todayIsoDate(): string {
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
+
+// A click event with detail 0 was produced by the keyboard (Enter/Space on a
+// focused button), not by a pointer. Logged with each sale submission so a
+// stray Enter (barcode scanner, stuck key) can be told from a real click.
+function triggerOf(event: React.MouseEvent<HTMLButtonElement>): SubmitTrigger {
+  return event.detail === 0 ? "keyboard" : "pointer";
+}
+
+// Text-entry inputs where Enter would implicitly submit the form.
+const NON_TEXT_INPUT_TYPES = new Set(["checkbox", "radio", "button", "submit", "reset", "file"]);
+
+type SaleReview = {
+  customerName: string;
+  isPaid: boolean;
+};
 
 const DISCOUNT_TYPE_LABELS: Record<DiscountType, string> = {
   none: "No discount",
@@ -357,6 +388,28 @@ export function SaleForm({
   const [vatExempt, setVatExempt] = useState(false);
   const [serviceSelectValue, setServiceSelectValue] = useState<string>("");
 
+  // Submit guard. The form no longer posts on its own: Enter in a field is
+  // swallowed, the submit button only opens a review dialog, and the sale is
+  // recorded from the dialog's Confirm button. The one-time token makes the
+  // server refuse to record the same form twice (see recordSale + migration
+  // 0060); the counters below are logged with it for diagnosis.
+  const formRef = useRef<HTMLFormElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const submissionTokenRef = useRef<string | null>(null);
+  const formOpenedAtRef = useRef<number | null>(null);
+  const enterBlockedCountRef = useRef(0);
+  const reviewTriggerRef = useRef<SubmitTrigger | null>(null);
+  const [review, setReview] = useState<SaleReview | null>(null);
+
+  useEffect(() => {
+    // Set after mount (not during render) so server and client markup match.
+    formOpenedAtRef.current = Date.now();
+    submissionTokenRef.current =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : null;
+  }, []);
+
   useEffect(() => {
     if (state.error) {
       toast.error(state.error);
@@ -518,8 +571,79 @@ export function SaleForm({
 
   const customerId = useNewCustomer ? "" : (selectedCustomer?.id ?? "");
 
+  const totalUnits = lines.reduce(
+    (sum: number, line: DraftLine) => sum + (Number.parseFloat(line.quantity) || 0),
+    0,
+  );
+
+  // Enter inside a text/number field would implicitly submit the form — the
+  // cause of sales "submitting by themselves" mid-entry. Swallow it and count
+  // it. Buttons, checkboxes and the dropdowns keep their normal Enter.
+  function handleFormKeyDown(event: React.KeyboardEvent<HTMLFormElement>) {
+    if (event.key !== "Enter") return;
+    const target = event.target;
+    if (target instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(target.type)) {
+      event.preventDefault();
+      enterBlockedCountRef.current += 1;
+    }
+  }
+
+  // Submit never records directly — it only opens the review dialog. Runs
+  // after the browser's own required-field validation has passed.
+  function handleReview(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending || lines.length === 0) return;
+
+    const formData = new FormData(event.currentTarget);
+    const newCustomerName = String(formData.get("new_customer_name") ?? "").trim();
+    if (!customerId && newCustomerName.length === 0) {
+      toast.error("Select a customer or enter a new customer name.");
+      return;
+    }
+    if (finalExceedsGross) {
+      toast.error(`Final price exceeds item total (${formatCurrency(gross)}).`);
+      return;
+    }
+
+    setReview({
+      customerName: selectedCustomer?.name ?? newCustomerName,
+      isPaid: formData.get("is_paid") === "true",
+    });
+  }
+
+  function handleConfirm(event: React.MouseEvent<HTMLButtonElement>) {
+    const form = formRef.current;
+    if (!form || pending) return;
+
+    // Built while the fields are still enabled (disabled inputs are left out
+    // of FormData), then sent with the token + diagnostics.
+    const formData = new FormData(form);
+    if (submissionTokenRef.current) {
+      formData.set("submission_token", submissionTokenRef.current);
+    }
+    if (formOpenedAtRef.current !== null) {
+      const seconds = Math.max(0, Math.round((Date.now() - formOpenedAtRef.current) / 1000));
+      formData.set("form_open_seconds", String(seconds));
+    }
+    formData.set("enter_blocked_count", String(enterBlockedCountRef.current));
+    if (reviewTriggerRef.current) {
+      formData.set("review_trigger", reviewTriggerRef.current);
+    }
+    formData.set("confirm_trigger", triggerOf(event));
+
+    setReview(null);
+    startTransition(() => {
+      formAction(formData);
+    });
+  }
+
   return (
-    <form action={formAction} className="flex flex-col gap-6">
+    <form
+      ref={formRef}
+      onSubmit={handleReview}
+      onKeyDown={handleFormKeyDown}
+      className="flex flex-col gap-6"
+    >
       <input type="hidden" name="lines" value={linesJson} />
       <input type="hidden" name="customer_id" value={customerId} />
 
@@ -915,10 +1039,74 @@ export function SaleForm({
       ) : null}
 
       <div>
-        <Button type="submit" disabled={pending || lines.length === 0}>
-          {pending ? "Recording..." : "Record sale"}
+        <Button
+          type="submit"
+          disabled={pending || lines.length === 0}
+          onClick={(event: React.MouseEvent<HTMLButtonElement>) => {
+            reviewTriggerRef.current = triggerOf(event);
+          }}
+        >
+          {pending ? "Recording..." : "Review sale"}
         </Button>
       </div>
+
+      <Dialog
+        open={review !== null}
+        onOpenChange={(open: boolean) => {
+          if (!open) setReview(null);
+        }}
+      >
+        <DialogContent
+          // Focus lands on "Go back", never on Confirm: a stray Enter right
+          // after the dialog opens cancels instead of recording.
+          onOpenAutoFocus={(event: Event) => {
+            event.preventDefault();
+            cancelButtonRef.current?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Record this sale?</DialogTitle>
+            <DialogDescription>
+              Check the details. Stock is deducted as soon as you confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+            <dt className="text-muted-foreground">Customer</dt>
+            <dd className="text-right font-medium">{review?.customerName}</dd>
+            <dt className="text-muted-foreground">Lines</dt>
+            <dd className="text-right font-medium tabular-nums">
+              {lines.length} ({totalUnits} {totalUnits === 1 ? "unit" : "units"})
+            </dd>
+            <dt className="text-muted-foreground">Items total</dt>
+            <dd className="text-right font-medium tabular-nums">{formatCurrency(gross)}</dd>
+            <dt className="text-muted-foreground">Discount</dt>
+            <dd className="text-right font-medium tabular-nums">
+              -{formatCurrency(discountValue)}
+            </dd>
+            <dt className="font-semibold">Final price</dt>
+            <dd className="text-right font-semibold tabular-nums">
+              {formatCurrency(finalValue)}
+            </dd>
+            <dt className="text-muted-foreground">Payment</dt>
+            <dd className="text-right font-medium">
+              {review?.isPaid ? "Paid" : "Not yet paid"}
+            </dd>
+          </dl>
+          <DialogFooter>
+            <Button
+              ref={cancelButtonRef}
+              type="button"
+              variant="outline"
+              onClick={() => setReview(null)}
+            >
+              Go back
+            </Button>
+            <Button type="button" disabled={pending} onClick={handleConfirm}>
+              Confirm and record
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }
