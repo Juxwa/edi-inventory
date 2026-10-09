@@ -187,7 +187,7 @@ const NAV: NavSection[] = [
       {
         href: "/help",
         label: "User guide",
-        roles: ["admin", "branch_rep", "top_mgmt", "technical"],
+        roles: ["admin", "branch_rep", "top_mgmt", "technical", "supervisor"],
       },
     ],
   },

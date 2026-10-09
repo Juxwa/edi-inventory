@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { supervisorMayOpen } from "@/lib/approvals-only";
 import { getProfileContext, getBranchName } from "@/lib/supabase/profile";
 import { AppShell } from "@/components/app-shell";
 import { ViewAsBanner } from "@/components/admin/view-as-banner";
@@ -23,12 +24,12 @@ export default async function AppLayout({
   }
 
   // The HQ supervisor role is approvals-only. Data is already closed to it by
-  // RLS (it is in no role allowlist); this keeps the UI on the one page it
-  // can use. x-pathname is set by the middleware. Layouts do not re-run on
+  // RLS (it is in no role allowlist); this keeps the UI on the pages it can
+  // use (Approvals and the user guide). x-pathname is set by the middleware. Layouts do not re-run on
   // client-side navigation, so AppShell also mounts a client guard.
   if (profile.role === "supervisor") {
     const pathname = (await headers()).get("x-pathname") ?? "";
-    if (pathname !== "/approvals" && !pathname.startsWith("/approvals/")) {
+    if (!supervisorMayOpen(pathname)) {
       redirect("/approvals");
     }
   }

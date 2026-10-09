@@ -22,9 +22,50 @@ export type Guide = {
   sections: GuideSection[];
 };
 
-const ALL_ROLES: GuideRole[] = ["admin", "branch_rep", "top_mgmt", "technical"];
+const ALL_ROLES: GuideRole[] = [
+  "admin",
+  "branch_rep",
+  "top_mgmt",
+  "technical",
+  "supervisor",
+];
 
 export const GUIDES: Guide[] = [
+  {
+    slug: "whats-new",
+    title: "What’s new — October 2026",
+    summary:
+      "Recent changes to recording sales, and the new approval step for voids and returns.",
+    roles: ALL_ROLES,
+    sections: [
+      {
+        heading: "Recording a sale now has a confirmation step",
+        body: [
+          "The button at the bottom of the sale form is now Review sale. It opens a summary — customer, number of lines and units, totals, and payment — and the sale is recorded only when you click Confirm and record.",
+          "Pressing Enter in a text or number field no longer submits the form. This stops sales from being recorded by accident mid-entry, including when a barcode scanner sends Enter after a scan.",
+          "The same form can no longer record a sale twice. If it is submitted again, you are taken to the sale that was already recorded.",
+        ],
+        tips: [
+          "If something is wrong after you confirm, the error is shown on the form and everything you typed stays in place — fix it and review again.",
+        ],
+      },
+      {
+        heading: "Voids and returns now need head-office approval",
+        body: [
+          "Nobody voids a sale or returns an item directly any more — admin included. You file a request with a reason, and head office approves or rejects it.",
+          "Nothing changes on the sale or in stock until the request is approved.",
+          "Every request is kept: who asked, why, who decided, when, and any note. See the “Void & return requests and approvals” guide for the steps.",
+        ],
+      },
+      {
+        heading: "Two new roles at head office",
+        body: [
+          "HQ Staff: works like a branch representative of the head-office branch, and can also approve or reject requests filed by branches.",
+          "HQ Supervisor: approves or rejects every request, and is the only one who can decide requests filed by HQ staff or admin. This role uses the Approvals page only.",
+        ],
+      },
+    ],
+  },
   {
     slug: "getting-started",
     title: "Getting started",
@@ -56,6 +97,8 @@ export const GUIDES: Guide[] = [
           "Branch Representative: your branch’s stock, sales, customers, transfers and stock requests, and repair/earmold intake.",
           "Top Management: read access across all branches, plus reports.",
           "Technical: the repairs and earmolds work queues.",
+          "HQ Staff: the same access as a branch representative, for the head-office branch, plus approving void and return requests filed by branches.",
+          "HQ Supervisor: the Approvals page only — approves or rejects void and return requests.",
         ],
       },
       {
@@ -109,7 +152,7 @@ export const GUIDES: Guide[] = [
     slug: "sales",
     title: "Recording sales and returns",
     summary:
-      "Record stock and service sales, review sales history, and process returns.",
+      "Record stock and service sales, review sales history, and request returns or voids.",
     roles: ["admin", "branch_rep", "top_mgmt"],
     sections: [
       {
@@ -119,9 +162,13 @@ export const GUIDES: Guide[] = [
           "Select an existing customer or add a new one on the spot.",
           "Set the sale date and official receipt details (OR / CSI / CI numbers).",
           "Add line items: stock items are picked from your branch inventory (by serial for serialized products), and services use your branch’s service pricing.",
-          "Apply any discount, review the VAT breakdown and total, then save.",
+          "Apply any discount and check the VAT breakdown and total.",
+          "Click Review sale. Check the summary — customer, lines and units, totals, payment — then click Confirm and record. Go back returns you to the form with nothing lost.",
         ],
         tips: [
+          "Pressing Enter in a field does not submit the form (a barcode scanner’s Enter is ignored too). Only Review sale, then Confirm and record, saves the sale.",
+          "A form can only record one sale. If it is submitted twice, you are taken to the sale already recorded.",
+          "With the “Final sale price” discount, the final price cannot be higher than the items total.",
           "Sold stock is deducted from your branch inventory automatically.",
           "The sale is linked to the customer’s record, so it appears in their purchase history.",
         ],
@@ -129,16 +176,78 @@ export const GUIDES: Guide[] = [
       {
         heading: "Sales history",
         body: [
-          "Sales → Sales history lists your branch’s sales (all branches for admin and top management). Open a sale to see its full detail, print it, or process a return.",
+          "Sales → Sales history lists your branch’s sales (all branches for admin and top management). Open a sale to see its full detail, print it, or request a return or void.",
         ],
       },
       {
-        heading: "Processing a return",
+        heading: "Returning an item or voiding a sale",
         steps: [
           "Open the sale from Sales history.",
-          "Use Request return on the line being returned, enter the quantity and the reason, and send the request. To cancel a whole sale, use Request void at the top of the sale.",
+          "To return an item, use Request return on that line, enter the quantity and the reason, and send the request. To cancel a whole sale, use Request void at the top of the sale and give the reason.",
           "Nothing changes until head office approves the request. The sale shows a pending notice meanwhile; follow its status under Corrections → Void & return requests.",
-          "On approval the item’s after-sales status is updated (returned or partially returned) and the stock record is adjusted. If the request is rejected, the reason is shown with the request.",
+          "On approval the item’s after-sales status is updated (returned or partially returned) and the stock record is adjusted; an approved void restores all remaining stock and marks the sale VOIDED. If the request is rejected, the reason is shown with the request.",
+        ],
+        tips: [
+          "Serialized items are returned in full. Only stock lines can be returned — to undo a service line, request a void of the sale.",
+          "See the “Void & return requests and approvals” guide for who approves what.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: "approvals",
+    title: "Void & return requests and approvals",
+    summary:
+      "File a void or return request, follow its status, and — for head office — approve or reject requests.",
+    roles: ["admin", "branch_rep", "top_mgmt", "supervisor"],
+    sections: [
+      {
+        heading: "How it works",
+        body: [
+          "A sale is never voided and an item is never returned directly. Someone files a request with a reason; head office approves or rejects it; only an approved request changes the sale and the stock.",
+          "Each request records who filed it, the reason, who decided it, when, and any note. Requests are never deleted.",
+        ],
+      },
+      {
+        heading: "Filing a request",
+        steps: [
+          "Open the sale from Sales → Sales history.",
+          "Whole sale: click Request void, type the reason, and send.",
+          "One item: click Request return on the line, enter the quantity and the reason, and send.",
+          "The sale shows a pending notice and the line shows Return pending until head office decides.",
+        ],
+        tips: [
+          "Branch users can file requests for their own branch’s sales; admin can file for any branch. Top management and the HQ supervisor cannot file requests.",
+          "Only one void request per sale and one return request per line can be open at a time.",
+          "Write a clear reason — the approver decides from what you write.",
+        ],
+      },
+      {
+        heading: "Following a request",
+        body: [
+          "Corrections → Void & return requests lists the requests you can see: those waiting for a decision at the top, and the history below with the status (Approved, Rejected, Cancelled), who decided, and their note.",
+          "You can cancel your own request while it is still waiting.",
+          "If a request is rejected, read the note, then file a new request if it is still needed.",
+        ],
+      },
+      {
+        heading: "Approving or rejecting (HQ staff and HQ supervisor)",
+        steps: [
+          "Open Approvals in the sidebar. The number beside it is how many requests are waiting.",
+          "Read the reason and check the sale details shown with the request.",
+          "Click Approve to apply it: stock is restored and the sale is updated immediately. This cannot be undone.",
+          "Or click Reject and type why — a note is required so the branch knows what to do next.",
+        ],
+        tips: [
+          "If an approval fails with a message (for example, another active stock row has the same serial), nothing was changed and the request stays waiting. Fix the cause, or reject the request.",
+        ],
+      },
+      {
+        heading: "Who can approve what",
+        body: [
+          "Requests filed by a branch: HQ staff or the HQ supervisor.",
+          "Requests filed by HQ staff or by admin: the HQ supervisor only. These show “Needs HQ supervisor” to HQ staff.",
+          "Nobody can approve or reject their own request, and admin cannot approve.",
         ],
       },
     ],
@@ -422,8 +531,9 @@ export const GUIDES: Guide[] = [
         heading: "Adding a user",
         steps: [
           "Go to Admin → Users and add a new user with their name and email.",
-          "Assign a role: Admin, Branch Representative, Top Management, or Technical.",
+          "Assign a role: Admin, Branch Representative, Top Management, Technical, HQ Staff, or HQ Supervisor.",
           "Branch representatives must be assigned to a branch — this controls which stock, sales, and customers they see.",
+          "HQ Staff must be assigned to the head-office branch. The HQ Supervisor does not need a branch.",
         ],
       },
       {
@@ -438,12 +548,15 @@ export const GUIDES: Guide[] = [
           "Give Admin only to head-office staff who receive stock and serve requests.",
           "Top Management is the safe read-only choice for owners and managers who need visibility without edit access.",
           "Technical is for repair staff — they see the repair and earmold queues across branches, but not sales or inventory.",
+          "HQ Staff is for head-office staff who also approve void and return requests from branches.",
+          "HQ Supervisor is for the person who signs off voids and returns. Keep at least one active HQ Supervisor: requests filed by HQ staff or admin can only be decided by a supervisor, and with no approvers at all no void or return can go through.",
         ],
       },
       {
         heading: "Corrections log",
         body: [
           "Admin → Corrections log records every void, reversal, and serial correction made anywhere in the app, each with the reason given and a before/after snapshot of the record.",
+          "Sale voids appear here once their request is approved. The requests themselves — including rejected and cancelled ones, and all line returns — are under Corrections → Void & return requests.",
           "Filter by entity (sale, stock intake, stock, transfer, repair, earmold, serial) and date range. Click Details on a row to see the full before/after data.",
         ],
         tips: [
@@ -548,6 +661,7 @@ const PATH_GUIDES: [prefix: string, slug: string][] = [
   ["/products", "inventory"],
   ["/suppliers", "inventory"],
   ["/sales", "sales"],
+  ["/approvals", "approvals"],
   ["/customers", "customers"],
   ["/hearing-tests", "hearing-tests"],
   ["/transfers", "transfers"],
