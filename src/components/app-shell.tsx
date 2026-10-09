@@ -4,6 +4,7 @@ import { Nav } from "@/components/nav";
 import { Header } from "@/components/header";
 import { ChatWidget } from "@/components/chat/chat-widget";
 import { WelcomeTour } from "@/components/help/welcome-tour";
+import { ApprovalsOnlyGuard } from "@/components/approvals/approvals-only-guard";
 import type { Profile } from "@/lib/supabase/profile";
 
 type AppShellProps = {
@@ -12,6 +13,8 @@ type AppShellProps = {
   // Pinned between the header and the scrolling main area, so it stays put on
   // every page. Only the backend admin's view-as banner uses it.
   banner?: React.ReactNode;
+  // Correction requests waiting for a decision (approvers only).
+  pendingApprovals?: number;
   children: React.ReactNode;
 };
 
@@ -19,6 +22,7 @@ export function AppShell({
   profile,
   branchName,
   banner,
+  pendingApprovals = 0,
   children,
 }: AppShellProps) {
   return (
@@ -39,7 +43,11 @@ export function AppShell({
             />
           </Link>
         </div>
-        <Nav role={profile.role} />
+        <Nav
+          role={profile.role}
+          approver={profile.approver}
+          pendingApprovals={pendingApprovals}
+        />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -49,6 +57,7 @@ export function AppShell({
         <main className="flex-1 overflow-y-auto p-6 pb-24 print:pb-0">{children}</main>
       </div>
 
+      {profile.role === "supervisor" ? <ApprovalsOnlyGuard /> : null}
       <ChatWidget
         currentUserId={profile.id}
         role={profile.role}

@@ -30,6 +30,8 @@ const ROLE_BLURB: Record<Profile["role"], string> = {
     "As top management you have read access across all branches, plus sales and stock-movement reports.",
   technical:
     "As technical staff you work the repair and earmold queues and keep their status timelines up to date.",
+  supervisor:
+    "As HQ supervisor you approve or reject void and return requests on the Approvals page.",
 };
 
 type TourStep = {

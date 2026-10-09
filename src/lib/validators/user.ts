@@ -25,7 +25,14 @@ const requiredText = z.preprocess(
   z.string({ required_error: "Required" }).min(1, "Required"),
 );
 
-export const USER_ROLES = ["admin", "branch_rep", "top_mgmt", "technical"] as const;
+export const USER_ROLES = [
+  "admin",
+  "branch_rep",
+  "top_mgmt",
+  "technical",
+  "hq_staff",
+  "supervisor",
+] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 const roleWithBranch = z
@@ -38,6 +45,15 @@ const roleWithBranch = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Branch reps must be assigned a branch.",
+        path: ["branch_id"],
+      });
+    }
+    // HQ staff only work (and approve) as members of the head-office branch;
+    // the action checks the chosen branch really is head office.
+    if (data.role === "hq_staff" && !data.branch_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "HQ staff must be assigned to the head-office branch.",
         path: ["branch_id"],
       });
     }

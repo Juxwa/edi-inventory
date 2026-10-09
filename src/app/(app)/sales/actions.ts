@@ -7,10 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/supabase/profile";
 import {
   recordSaleSchema,
-  returnSaleLineSchema,
   saleSubmissionMetaSchema,
   type SaleActionState,
-  type ReturnActionState,
   type SaleLineInput,
   type RecordSaleInput,
   type SaleSubmissionMeta,
@@ -418,37 +416,6 @@ export async function recordSale(
 
   revalidatePath("/sales");
   redirect(`/sales/${saleId}`);
-}
-
-export async function returnSaleLine(
-  _prevState: ReturnActionState,
-  formData: FormData,
-): Promise<ReturnActionState> {
-  const parsed = returnSaleLineSchema.safeParse({
-    line_id: formData.get("line_id"),
-    sale_id: formData.get("sale_id"),
-    quantity: formData.get("quantity"),
-    note: formData.get("note"),
-  });
-
-  if (!parsed.success) {
-    return { ok: false, error: firstIssueMessage(parsed.error.issues) };
-  }
-
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("sale_return_line", {
-    p_line_id: parsed.data.line_id,
-    p_quantity: parsed.data.quantity,
-    p_note: parsed.data.note,
-  });
-
-  if (error) {
-    return { ok: false, error: rpcErrorMessage(error, "Could not return line.") };
-  }
-
-  revalidatePath(`/sales/${parsed.data.sale_id}`);
-  revalidatePath("/sales");
-  return { ok: true };
 }
 
 export type PaymentActionState = {

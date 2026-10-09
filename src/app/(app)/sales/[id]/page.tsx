@@ -11,7 +11,7 @@ import { VoidedBanner } from "@/components/admin/voided-banner";
 import { VoidDialog } from "@/components/admin/void-dialog";
 import { SerialCorrectDialog } from "@/components/admin/serial-correct-dialog";
 import { SaleEditDialog } from "@/components/admin/sale-edit-dialog";
-import { voidSale } from "@/app/(app)/admin/corrections/actions";
+import { requestSaleVoid } from "@/app/(app)/approvals/actions";
 import {
   Table,
   TableBody,
@@ -250,9 +250,37 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
   const isVatExempt = isScOrPwd || (saleRow.vat_exempt ?? false);
 
   const isVoided = saleRow.voided_at !== null;
-  const canReturn =
-    !isVoided && (profile.role === "admin" || profile.branch_id === saleRow.branch_id);
   const isAdmin = profile.role === "admin";
+  // Voids and returns are requests decided by head office (migration 0062),
+  // never applied directly. Admin or the sale's own branch may file one;
+  // top management is read-only. The RPC enforces the same rule.
+  const canRequestCorrection =
+    !isVoided &&
+    profile.role !== "top_mgmt" &&
+    (isAdmin || profile.branch_id === saleRow.branch_id);
+
+  const { data: pendingRequestData } = await supabase
+    .from("correction_requests")
+    .select("id, kind, sale_line_id, quantity, reason, requested_at")
+    .eq("sale_id", saleRow.id)
+    .eq("status", "pending");
+  type PendingRequestRow = {
+    id: string;
+    kind: "sale_void" | "sale_return_line";
+    sale_line_id: string | null;
+    quantity: number | null;
+    reason: string;
+    requested_at: string;
+  };
+  const pendingRequests: PendingRequestRow[] =
+    (pendingRequestData as PendingRequestRow[] | null) ?? [];
+  const pendingVoid =
+    pendingRequests.find((row: PendingRequestRow) => row.kind === "sale_void") ?? null;
+  const pendingReturnLineIds = new Set<string>(
+    pendingRequests
+      .filter((row: PendingRequestRow) => row.kind === "sale_return_line" && row.sale_line_id)
+      .map((row: PendingRequestRow) => row.sale_line_id as string),
+  );
 
   // Payment math mirrors the sale_add_payment RPC / sales_balances view
   // (0056): the / 1.12 base applies ONLY to SC/PWD (their discount is
@@ -311,15 +339,16 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
               currentIsPaid={saleRow.is_paid}
             />
           ) : null}
-          {isAdmin && !isVoided ? (
+          {canRequestCorrection && !pendingVoid ? (
             <VoidDialog
-              action={voidSale}
+              action={requestSaleVoid}
               hiddenFields={{ sale_id: saleRow.id }}
-              triggerLabel="Void sale"
-              title="Void this sale"
-              description="Stock will be restored and the sale marked voided. This cannot be undone."
-              confirmLabel="Void sale"
-              pendingLabel="Voiding..."
+              triggerLabel="Request void"
+              title="Request to void this sale"
+              description="Nothing changes until head office approves. On approval, stock is restored and the sale is marked voided."
+              confirmLabel="Send request"
+              pendingLabel="Sending..."
+              successMessage="Void request sent for HQ approval."
             />
           ) : null}
           <PrintButton />
@@ -328,6 +357,23 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
 
       {isVoided ? (
         <VoidedBanner reason={saleRow.void_reason} actorName={voidedByName} when={saleRow.voided_at} />
+      ) : null}
+
+      {!isVoided && pendingRequests.length > 0 ? (
+        <div className="rounded-lg border border-warning/50 bg-warning/10 px-4 py-3 text-sm print:hidden">
+          <p className="font-semibold">
+            {pendingVoid
+              ? "Void request pending HQ approval"
+              : `${pendingRequests.length} return ${pendingRequests.length === 1 ? "request" : "requests"} pending HQ approval`}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {pendingVoid ? `Reason: ${pendingVoid.reason}. ` : ""}
+            Nothing has changed on this sale yet.{" "}
+            <Link href="/approvals" className="font-medium text-primary hover:underline">
+              View requests
+            </Link>
+          </p>
+        </div>
       ) : null}
 
       <Card>
@@ -438,8 +484,13 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
                   lines.map((line: LineRow) => {
                     const returnedQty = line.returned_quantity ?? 0;
                     const remaining = line.quantity - returnedQty;
+                    const returnPending = pendingReturnLineIds.has(line.id);
                     const canReturnLine =
-                      line.line_type === "stock" && remaining > 0 && canReturn;
+                      line.line_type === "stock" &&
+                      remaining > 0 &&
+                      canRequestCorrection &&
+                      !returnPending &&
+                      !pendingVoid;
                     return (
                       <TableRow key={line.id}>
                         <TableCell className="font-medium">
@@ -489,6 +540,8 @@ export default async function SaleDetailPage({ params }: SaleDetailPageProps) {
                               itemLabel={lineName(line)}
                               remainingQuantity={remaining}
                             />
+                          ) : returnPending ? (
+                            <Badge variant="warning">Return pending</Badge>
                           ) : null}
                         </TableCell>
                       </TableRow>

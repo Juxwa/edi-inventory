@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/supabase/profile";
 import {
-  saleVoidSchema,
   intakeVoidSchema,
   transferReverseSchema,
   serialCorrectSchema,
@@ -40,36 +39,6 @@ async function requireAdmin(): Promise<CorrectionActionState | null> {
     return { ok: false, error: "Not authorized." };
   }
   return null;
-}
-
-export async function voidSale(
-  _prevState: CorrectionActionState,
-  formData: FormData,
-): Promise<CorrectionActionState> {
-  const denied = await requireAdmin();
-  if (denied) return denied;
-
-  const parsed = saleVoidSchema.safeParse({
-    sale_id: formData.get("sale_id"),
-    reason: formData.get("reason"),
-  });
-  if (!parsed.success) {
-    return { ok: false, error: firstIssueMessage(parsed.error.issues) };
-  }
-
-  const supabase = await createClient();
-  const { error } = await supabase.rpc("sale_void", {
-    p_sale_id: parsed.data.sale_id,
-    p_reason: parsed.data.reason,
-  });
-  if (error) {
-    return { ok: false, error: rpcErrorMessage(error, "Could not void sale.") };
-  }
-
-  revalidatePath(`/sales/${parsed.data.sale_id}`);
-  revalidatePath("/sales");
-  revalidatePath("/admin/corrections");
-  return { ok: true };
 }
 
 export async function voidIntake(
