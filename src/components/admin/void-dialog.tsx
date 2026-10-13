@@ -30,6 +30,7 @@ export function VoidDialog({
   description,
   confirmLabel,
   pendingLabel,
+  successMessage = "Done.",
   variant = "destructive",
 }: {
   action: (
@@ -42,6 +43,7 @@ export function VoidDialog({
   description?: string;
   confirmLabel: string;
   pendingLabel: string;
+  successMessage?: string;
   variant?: "destructive" | "outline" | "secondary";
 }) {
   const router = useRouter();
@@ -54,14 +56,14 @@ export function VoidDialog({
 
   useEffect(() => {
     if (state.ok) {
-      toast.success("Done.");
+      toast.success(successMessage);
       setOpen(false);
       setReason("");
       router.refresh();
     } else if (state.error) {
       toast.error(state.error);
     }
-  }, [state, router]);
+  }, [state, router, successMessage]);
 
   return (
     <Dialog

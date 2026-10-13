@@ -15,9 +15,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { returnSaleLine } from "@/app/(app)/sales/actions";
-import { initialReturnState, type ReturnActionState } from "@/lib/validators/sale";
+import { requestSaleReturn } from "@/app/(app)/approvals/actions";
+import {
+  initialRequestState,
+  type RequestActionState,
+} from "@/lib/validators/correction-request";
 
+// Returns are not applied directly: this files a return REQUEST with a
+// reason, and head office approves or rejects it on the Approvals page.
 export function ReturnDialog({
   saleId,
   lineId,
@@ -32,14 +37,15 @@ export function ReturnDialog({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [quantity, setQuantity] = useState(String(remainingQuantity));
+  const [reason, setReason] = useState("");
   const [state, formAction, pending] = useActionState<
-    ReturnActionState,
+    RequestActionState,
     FormData
-  >(returnSaleLine, initialReturnState);
+  >(requestSaleReturn, initialRequestState);
 
   useEffect(() => {
     if (state.ok) {
-      toast.success("Line returned.");
+      toast.success("Return request sent for HQ approval.");
       setOpen(false);
       router.refresh();
     } else if (state.error) {
@@ -52,18 +58,23 @@ export function ReturnDialog({
       open={open}
       onOpenChange={(next: boolean) => {
         setOpen(next);
-        if (next) setQuantity(String(remainingQuantity));
+        if (next) {
+          setQuantity(String(remainingQuantity));
+          setReason("");
+        }
       }}
     >
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
-          Return
+          Request return
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Return line</DialogTitle>
-          <DialogDescription>{itemLabel}</DialogDescription>
+          <DialogTitle>Request a return</DialogTitle>
+          <DialogDescription>
+            {itemLabel}. Stock is restored only after head office approves.
+          </DialogDescription>
         </DialogHeader>
 
         <form action={formAction} className="grid gap-4">
@@ -91,12 +102,17 @@ export function ReturnDialog({
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="note">Note (optional)</Label>
+            <Label htmlFor="reason">Reason (required)</Label>
             <textarea
-              id="note"
-              name="note"
+              id="reason"
+              name="reason"
               rows={3}
+              required
               disabled={pending}
+              value={reason}
+              onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) =>
+                setReason(event.target.value)
+              }
               className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               placeholder="Reason for return"
             />
@@ -109,8 +125,8 @@ export function ReturnDialog({
           ) : null}
 
           <DialogFooter>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Returning..." : "Confirm return"}
+            <Button type="submit" disabled={pending || reason.trim().length === 0}>
+              {pending ? "Sending..." : "Send request"}
             </Button>
           </DialogFooter>
         </form>

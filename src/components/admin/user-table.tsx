@@ -62,6 +62,8 @@ const ROLE_LABEL: Record<UserRole, string> = {
   branch_rep: "Branch Rep",
   top_mgmt: "Top Management",
   technical: "Technical",
+  hq_staff: "HQ Staff",
+  supervisor: "HQ Supervisor",
 };
 
 const NO_BRANCH = "none";
