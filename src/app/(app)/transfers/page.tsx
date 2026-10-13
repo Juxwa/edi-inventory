@@ -4,6 +4,7 @@ import { PlusIcon } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getProfile } from "@/lib/supabase/profile";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -13,10 +14,15 @@ import {
 } from "@/components/ui/select";
 import { TransferTable, type TransferRowData } from "@/components/transfers/transfer-table";
 import { TRANSFER_STATUSES, type TransferStatus } from "@/lib/validators/transfer";
+import { containsPattern } from "@/lib/like";
+import { listTransfersPage } from "@/lib/transfer-search";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
+
+const TRANSFER_COLUMNS =
+  "id, code, status, from_branch_id, to_branch_id, transfer_date, received_date, courier, created_at, transfer_line_items(count)";
 
 function formatStatusLabel(status: string): string {
   return status
@@ -29,6 +35,7 @@ type TransfersPageProps = {
   searchParams: Promise<{
     status?: string;
     branch?: string;
+    q?: string;
     page?: string;
   }>;
 };
@@ -56,6 +63,7 @@ export default async function TransfersPage({
   const params = await searchParams;
   const statusParam = params.status?.trim() ?? "";
   const branchParam = params.branch?.trim() ?? "";
+  const q = params.q?.trim() ?? "";
   const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -70,26 +78,19 @@ export default async function TransfersPage({
     .order("name");
   const branches: { id: string; name: string; is_active: boolean }[] = branchesResult.data ?? [];
 
-  let query = supabase
-    .from("transfers")
-    .select(
-      "id, code, status, from_branch_id, to_branch_id, transfer_date, received_date, courier, created_at, transfer_line_items(count)",
-      { count: "exact" },
-    )
-    .order("created_at", { ascending: false })
-    .range(from, to);
-
-  if (statusParam) {
-    query = query.eq("status", statusParam);
-  }
-  if (canFilterByBranch && branchParam) {
-    query = query.or(
-      `from_branch_id.eq.${branchParam},to_branch_id.eq.${branchParam}`,
-    );
-  }
-
-  const { data, count } = await query;
-  const rows: TransferQueryRow[] = (data as TransferQueryRow[] | null) ?? [];
+  // Search covers the transfer code, courier, tracking code, SIS no. and
+  // line serial numbers (see listTransfersPage).
+  const { rows, total } = await listTransfersPage<TransferQueryRow>(
+    supabase,
+    TRANSFER_COLUMNS,
+    {
+      status: statusParam,
+      branchId: canFilterByBranch ? branchParam : "",
+      searchPattern: containsPattern(q),
+    },
+    from,
+    to,
+  );
 
   const branchNameById = new Map<string, string>(
     branches.map((branch: { id: string; name: string; is_active: boolean }) => [
@@ -139,18 +140,18 @@ export default async function TransfersPage({
     has_discrepancy: discrepantTransferIds.has(row.id),
   }));
 
-  const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   function buildPageHref(targetPage: number): string {
     const next = new URLSearchParams();
     if (statusParam) next.set("status", statusParam);
     if (branchParam) next.set("branch", branchParam);
+    if (q) next.set("q", q);
     next.set("page", String(targetPage));
     return `/transfers?${next.toString()}`;
   }
 
-  const hasFilters = statusParam || branchParam;
+  const hasFilters = statusParam || branchParam || q;
 
   return (
     <div className="flex flex-col gap-6">
@@ -170,6 +171,19 @@ export default async function TransfersPage({
       </div>
 
       <form className="flex flex-wrap items-end gap-3" method="get">
+        <div className="grid gap-1.5">
+          <label htmlFor="q" className="text-sm font-medium">
+            Search
+          </label>
+          <Input
+            id="q"
+            name="q"
+            type="search"
+            defaultValue={q}
+            placeholder="Code, serial, courier, tracking or SIS no."
+            className="w-72"
+          />
+        </div>
         <div className="grid gap-1.5">
           <label htmlFor="status" className="text-sm font-medium">
             Status

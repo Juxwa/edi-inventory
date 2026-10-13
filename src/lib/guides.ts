@@ -195,6 +195,17 @@ export const GUIDES: Guide[] = [
         ],
       },
       {
+        heading: "Finding a transfer",
+        body: [
+          "On Transfers → Transfers, type in the Search box and click Apply (or press Enter). It looks in the transfer code, courier, tracking code, SIS no., and the serial numbers of the items on each transfer.",
+          "Part of a code or serial is enough, and capital letters do not matter. Combine the search with the Status and Branch filters to narrow the list; Clear resets everything.",
+        ],
+        tips: [
+          "Looking for where a unit went? Search its serial number to list every transfer it was on.",
+          "Product names are not searched — use the serial number or the transfer code.",
+        ],
+      },
+      {
         heading: "Creating and dispatching (sending branch)",
         steps: [
           "Go to Transfers → Transfers and create a new transfer, choosing the from and to branches.",
